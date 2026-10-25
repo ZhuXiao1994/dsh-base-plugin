@@ -6,18 +6,24 @@ load-bearing.
 
 ## What this is
 
-A **host-only** plugin bundle for DeepSeek Harness. It gives the **third-party
-models** a profile declares by hand under `llm-pi-ai` their **native** reasoning
-levels — the effort control inside the composer's model picker.
+A **host-only** plugin bundle for DeepSeek Harness with two independent
+features:
 
-It ships no interface. The editing surface is the native **Settings → Models**
-page. Do not add a settings page; that design was explicitly rejected by the
-user as "not native enough and not dynamic enough".
+1. It gives the **third-party models** a profile declares by hand under
+   `llm-pi-ai` their **native** reasoning levels — the effort control inside the
+   composer's model picker.
+2. It raises one **Windows toast** when a task ends or the agent needs a human
+   decision. See [Attention reminders](#attention-reminders).
 
-- Package: `dsh-thinking-depth` (currently `0.2.2`)
-- Entry: `index.js` — `export function apply(ctx)`, `export const inject = ["settings"]`
+It ships no interface. The editing surface for feature one is the native
+**Settings → Models** page. Do not add a settings page; that design was
+explicitly rejected by the user as "not native enough and not dynamic enough".
+
+- Package: `dsh-thinking-depth` (currently `0.3.0`)
+- Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`
 - No client half: no `dsh.client` in `package.json`, no `./client` export
+- Reminder toggle: `config.notifications: false` in a profile patch override
 
 ## The mechanism you must understand first
 
@@ -56,20 +62,39 @@ the host `settings` service. That is the only viable path; see
    `descriptor.user` (the profile patch), never from `descriptor.value`
    (resolved), so an addition cannot materialize catalog defaults from a lower
    configuration layer.
+7. **A reminder can never fail an agent.** Every listener catches its own errors,
+   the sender is fire-and-forget, and the whole feature is optional. A broken
+   toast channel is a debug log, never a thrown event handler.
+8. **Remind once.** The two completion signals (`agent/status: idle` and the
+   `turn/end` fallback) must collapse to one toast; question and approval ids
+   must not replay within their dedupe window; a `turn/start` cancels a pending
+   completion.
+9. **Root sessions only.** Subagent sessions (`session.header.delegationDepth >
+   0`, `parentSession`, `origin: "subagent"`, or `agent.options.subagentDepth >
+   0`) must never toast. The parent's result already reports the child's work.
+10. **Reminder content is inert text.** It is built from the session log and
+    escaped for PowerShell/XML. Never interpolate it into a shell command
+    without the escaping helpers.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `index.js` | The whole plugin: rule tables, `capabilityFor()`, `planSweep()`, `apply()` |
+| `index.js` | Feature one and entry: rule tables, `capabilityFor()`, `planSweep()`, `apply()` |
+| `notify.js` | Feature two: trigger classification, toast builders, dedupe, listener installation |
+| `notify-windows.js` | Windows toast transport: PowerShell script builder, XML/PowerShell escaping, sender |
 | `cordis.patch.yml` | Bundle patch, inserts the row |
 | `locale/{en,zh}.json` | `meta.title` / `meta.description` for the plugin inventory |
 | `icon.svg` | Inventory icon (SVG, well under 256 KiB) |
-| `tools/verify-host.mjs` | Offline behaviour harness — run it after every change |
+| `icon.png` | 64×64 toast `appLogoOverride` image, generated from `icon.svg` |
+| `tools/verify-host.mjs` | Feature-one offline harness |
+| `tools/verify-notify.mjs` | Feature-two offline harness (fake host event bus) |
+| `tools/notify-smoke.mjs` | Manual real-toast smoke test (Windows, user-visible) |
 | `package.json` | Manifest; `scripts.verify`, `scripts.pack` |
 
-Exported for testing, and safe to keep exported: `capabilityFor(modelId)` and
-`planSweep(descriptor)`.
+Exported for testing, and safe to keep exported from `index.js`:
+`capabilityFor(modelId)` and `planSweep(descriptor)`. From `notify.js`, the pure
+builders and `installAttention(ctx, options)` are exported for the harness.
 
 ## Rule tables
 
@@ -102,6 +127,58 @@ To mine a new family, index every entry whose `api` is
 `openai-completions` and `reasoning` is `true`, group by id suffix, and take the
 levels the family agrees on. Put the reduction in `FAMILY_RULES`; put a single
 id in `EXACT_RULES` only when you have its catalog record in hand.
+
+## Attention reminders
+
+`notify.js` installs two root-scoped listeners and one Windows transport. Its
+contract is deliberately narrower than a general notification framework:
+
+| Trigger | Source | Toast |
+|---|---|---|
+| A turn finished | `agent/status` with `status: "idle"`, reading the last `turn/end` | `任务完成` / `任务出错` / `输出达到上限` / `任务被阻塞` |
+| A choice UI opened | `session/event` → `tool/call` with `name: "ask_user_question"` | `需要你的选择` |
+| An approval is waiting | `session/event` → `approval/asked` | `需要你的确认` |
+| A turn ended without a status event | `session/event` → `turn/end`, 2.5 s fallback | same completion text |
+
+Key rules:
+
+- **Completion is one toast.** `agent/status: idle` normally wins (400 ms settle)
+  and replaces the `turn/end` fallback timer. `turn/start` cancels either. The
+  dedupe key is `done:<sessionId>:<turn/end seq>`, so the two signals for one
+  turn collapse while a later turn (a different seq) still notifies.
+- **Question/approval identity is `callId` / approval `id`.** They are deduped
+  for 60 s; a replay must not toast again.
+- **Aborted, interrupted and forked turns are silent** — the human stopped the
+  work or the app moved it. `max-tokens` is reported: a truncated answer is
+  exactly something the user should see.
+- **Root only.** `isRootSession()` checks `header.delegationDepth`,
+  `header.parentSession` and `header.origin`; `isRootAgent()` also checks
+  `options.subagentDepth`. Unknown shapes default to root (a missed completion is
+  worse than one extra toast).
+- **Text is a summary, not a transcript.** Body is collapsed to one line and
+  capped at 160 characters. Session title folds the last `session/title`, else
+  the first human `user/message`, else `会话 <8-char-id>`.
+- **Transport is Windows-only.** `notify-windows.js` raises a WinRT
+  `ToastText02` toast from `powershell.exe`, reuses the registered
+  `Microsoft.Windows.PowerShell` AUMID, plays the default notification sound and
+  adds the packaged `icon.png` as `appLogoOverride`. Every value passes through
+  `escapePowerShellString()` (single-quote doubling) and, for the icon attribute,
+  `escapeXmlAttribute()`. Never build a toast by string concatenation outside
+  those helpers.
+- **No network, no extra dependency, no shortcut registration.** The helper
+  process is capped at 15 s and lingers 2 s after `Show()`; failures only reach
+  `logger.debug`.
+- **Opt-out is `config.notifications: false`.** There is no UI and no settings
+  namespace for this; do not add one.
+
+### Why the events, not polling
+
+The host publishes `session/event` synchronously on every committed append and
+`agent/status` on every idle/running transition. Both events bypass restored
+sessions (seed events never publish on `session/event`), which is what makes the
+reminders replay-safe. `session.snapshotEvents()` is used to fold the title and
+the last turn; it is synchronous and available on the object the events carry.
+Do not add a timer-based scan for this feature.
 
 ## Install — Desktop
 
@@ -144,11 +221,25 @@ Run these in order; each catches a different class of mistake.
 ### 1. Offline behaviour (always)
 
 ```powershell
-pnpm verify        # or: node tools/verify-host.mjs
+pnpm verify        # runs verify-host.mjs and verify-notify.mjs
 ```
 
-Drives `planSweep()` with a descriptor shaped like `settings.describe()` and
-asserts the exact ops. Extend it whenever a rule changes.
+`tools/verify-host.mjs` drives `planSweep()` with a descriptor shaped like
+`settings.describe()` and asserts the exact ops. `tools/verify-notify.mjs`
+drives the pure toast builders and installs the notifier on a fake host event
+bus, asserting the root filter, dedupe, cancellation, fallback and cleanup.
+Extend both whenever a rule changes.
+
+### 1b. Real toast delivery (manual, Windows, before shipping a reminder change)
+
+```powershell
+node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度」通知通道正常。"
+```
+
+This starts the real `powershell.exe` WinRT path, so a toast should appear on
+the desktop. A successful run prints `toast handed to Windows` and exits 0; the
+helper itself logs scripting failures at debug level. Do not run it in a loop —
+each call raises a visible notification.
 
 ### 2. End-to-end in an isolated profile (always, before shipping)
 
@@ -176,6 +267,13 @@ filled without a restart, while a route that already declares levels must stay
 untouched. That is the only runnable proof of the trigger; a file edit alone never
 fires an event (see Traps).
 
+The same boot is the reminder feature's module-load check: `apply()` imports
+`notify.js`/`notify-windows.js`, installs the listeners and returns without
+throwing. A missing packaged file or a listener registration error would make the
+boot fail or log a plugin error. A **live** reminder needs a real agent turn and
+is therefore verified in the desktop profile by the user; the offline harness
+covers the event logic and `tools/notify-smoke.mjs` covers the transport.
+
 Clean up the scratch profile afterwards.
 
 ### 3. What you cannot verify here
@@ -183,6 +281,11 @@ Clean up the scratch profile afterwards.
 The rendered picker. There is no browser control in this environment and the
 running app's HTTP surface needs a token you must not go looking for. State that
 the visual result is unverified; do not claim otherwise.
+
+The toast's **visual** appearance is likewise unverified: the smoke helper proves
+PowerShell accepted the script and exited 0, not that Windows painted the toast.
+A real agent turn (and therefore a real reminder) requires a live model session;
+do not fake one by writing events into a session log.
 
 ## Traps
 
@@ -220,6 +323,23 @@ the visual result is unverified; do not claim otherwise.
   fails; `--profile X` alone selects the app from the profile's bundles.
 - **A dsh stdio app exits on stdin EOF.** Launching one from a background shell
   without holding a stdin pipe open makes it exit 0 immediately, silently.
+- **`session/event` and `agent/status` are scoped dispatches.** The notifier is a
+  root plugin, so an untagged listener also receives them, but
+  `{ global: true }` makes that explicit and survives a future context change.
+  A listener registered inside a session/agent context needs it.
+- **`agent.session.events` does not exist in this build.** Use
+  `session.snapshotEvents()` (or `ownEvents()`), as `eventsOf()` does. Do not
+  copy `dsh-task-notify`'s `agent.session.events` fold; it was written against an
+  older shape and silently falls back.
+- **The host is a forked Node process, not the Electron main process.**
+  `require('electron').Notification` is not a dependable transport here; the
+  PowerShell WinRT path is the one that is known to work.
+- **Never interpolate toast text into a PowerShell command string.** Use
+  `execFile(file, args[])` with the fixed script and the escaping helpers. The
+  session title is untrusted text.
+- **The toast helper needs an interactive desktop session.** A service or
+  headless run has nowhere to paint; Focus Assist and per-app notification
+  settings can suppress it. There is no fallback channel by design.
 - **Windows console encoding.** Chinese output in this repository is UTF-8;
   read and write files as UTF-8.
 

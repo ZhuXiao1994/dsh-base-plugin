@@ -2,9 +2,10 @@
 
 [English](README.md) | 中文
 
-DSH 思考深度是一个**纯宿主插件**：它让 DeepSeek Harness 中手工声明的**第三方模型**
-获得**原生**的「推理等级」，也就是输入框旁模型选择器里那个控件。它不提供任何自己的
-界面。
+DSH 思考深度是一个**纯宿主插件**，包含两个彼此独立的功能：它让 DeepSeek Harness
+中手工声明的**第三方模型**获得**原生**的「推理等级」，也就是输入框旁模型选择器里
+那个控件；同时在任务结束、或遇到需要你选择/确认的时候，弹出**桌面提醒**。它不提供
+任何自己的界面。
 
 ## 为什么第三方模型没有原生档位
 
@@ -76,12 +77,41 @@ const base = defaults.get(entry.id)        // 手写路由不在 catalog 里 →
 | 彻底停用插件 | 把插件行设为 `disabled: true` |
 | 换用别的 wire 格式 | 在模型上写 `compat.thinkingFormat`（`openai`、`deepseek`、`openrouter`、`qwen` 等） |
 
+## 任务提醒
+
+第二个功能与推理档位扫描彼此独立，默认开启。它会在以下时刻弹出一条 **Windows 通知**：
+
+- 一轮任务结束：`completed`、`error`、`max-tokens` 或 `blocked`——正文包含会话标题、
+  失败原因（如果有）以及本轮耗时；
+- 模型调用 `ask_user_question` 打开选择界面——正文包含问题文本和前几个选项；
+- 出现权限审批请求——正文包含工具名和审批原因。
+
+用户主动停止（`aborted`）、恢复的历史会话、维护任务以及**子代理会话**都不会提醒：
+根会话才属于你，子代理的完成结果已经包含在父会话里。插件只监听实时事件追加，因此
+回放或恢复会话不会重复提醒。完成提醒有两个来源——精确的 `agent/status: idle` 事件，
+以及 `turn/end` 兜底——新的 `turn/start` 会取消尚未发出的提醒，所以任务马上继续时
+不会误报「已完成」。
+
+提醒通过 Windows PowerShell 的 WinRT 通知接口发送，复用 PowerShell 已注册的
+AppUserModelID 和插件自带的 `icon.png`；不需要联网、不需要额外依赖，也不需要先注册
+开始菜单快捷方式。发送是「即发即忘」的：缺少 `powershell.exe`、通知通道被关闭、
+专注助手拦截或其他任何失败，都只记 debug 日志，绝不影响正在运行的会话。该功能仅支持
+Windows，其他平台会静默跳过。
+
+只想关掉提醒、保留推理档位功能时，在 Profile 的 `cordis.patch.yml` 里覆盖插件行：
+
+```yaml
+- id: dsh-thinking-depth
+  config:
+    notifications: false
+```
+
 ## 安装
 
 ```powershell
 # 在本目录打出压缩包，然后安装到当前 Profile
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.2.2.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.3.0.tgz"
 ```
 
 重启 DSH（或等宿主重载配置）后生效。插件是宿主插件，没有客户端 bundle，因此不需要
@@ -99,10 +129,17 @@ dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.2.2.tgz"
 ## 开发
 
 `tools/verify-host.mjs` 直接导入 `index.js`，用一个形状与 `settings.describe()`
-相同的描述符驱动规划函数，断言将要写入的确切内容。
+相同的描述符驱动规划函数，断言将要写入的确切内容。`tools/verify-notify.mjs`
+对提醒文案构建器和安装器做同样的离线检查，安装器由假的主机事件总线驱动。
 
 ```powershell
 pnpm verify
+```
+
+想验证真实的 Windows 通知通道，可以运行冒烟脚本（会弹出一条真实通知，并等待系统显示）：
+
+```powershell
+node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度」通知通道正常。"
 ```
 
 ## 说明与限制
@@ -113,6 +150,10 @@ pnpm verify
   因此唯一风险是你主动选了一个网关不接受的档位——那一次请求会失败，改回即可。
 - pi-ai 升级后 catalog 记录可能变化；精确条目与家族规则都来自本插件内置的表，
   需要时可随插件一起更新。
+- 提醒**仅支持 Windows**，而且有意做成「只看不动」：通知只说明发生了什么，不会激活或
+  聚焦 DSH 窗口。Windows 的专注助手和系统通知设置可能拦截它。
+- 提醒只根据根会话自己的事件日志判断；子代理的完成已经体现在父会话的结果里，因此不会
+  单独弹通知。
 
 ## 许可证
 

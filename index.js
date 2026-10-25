@@ -1,11 +1,11 @@
 /**
  * Host half of the Thinking Depth bundle.
  *
- * A hand-declared pi-ai route gets no reasoning metadata from the installed
- * catalog: `llm-pi-ai` looks a model up under the ROUTE's own name
- * (`catalogModels(provider)`), so a custom gateway's models resolve as
- * non-reasoning and the composer's native "reasoning effort" control offers
- * nothing at all.
+ * Feature one — reasoning levels. A hand-declared pi-ai route gets no
+ * reasoning metadata from the installed catalog: `llm-pi-ai` looks a model up
+ * under the ROUTE's own name (`catalogModels(provider)`), so a custom
+ * gateway's models resolve as non-reasoning and the composer's native
+ * "reasoning effort" control offers nothing at all.
  *
  * This plugin closes that gap at startup. For every model of a hand-declared
  * route that declares no `reasoningEfforts` of its own, it writes the
@@ -17,7 +17,15 @@
  * It only ever ADDS. A model that already declares `reasoningEfforts` — a
  * level map, or `false` for a model that cannot think — is left exactly as
  * configured, so the native Settings → Models page stays the final authority.
+ *
+ * Feature two — attention reminders. When a task finishes (completed, failed,
+ * over its output limit, or blocked) or the agent opens a choice UI — an
+ * `ask_user_question` call or an approval request — the plugin raises one
+ * Windows toast. See `notify.js`; delivery is fire-and-forget and can never
+ * fail the agent.
  */
+
+import { installAttention } from "./notify.js";
 
 /** The settings namespace that holds hand-declared provider routes. */
 const SETTINGS_NS = "llm-pi-ai";
@@ -164,10 +172,12 @@ export const inject = ["settings"];
 
 /**
  * Fill in the reasoning capability of hand-maintained-free routes' models, once
- * the Loader has settled and again whenever the configuration changes.
+ * the Loader has settled and again whenever the configuration changes, and
+ * install the attention reminders.
  * @param ctx - host plugin context.
+ * @param config - bundle config; `notifications: false` disables reminders.
  */
-export function apply(ctx) {
+export function apply(ctx, config = {}) {
 	/** How often each write has been tried, so a persistently failing write cannot loop. */
 	const attempts = new Map();
 	let sweeping = false;
@@ -246,4 +256,15 @@ export function apply(ctx) {
 			if (timer !== undefined) clearTimeout(timer);
 		};
 	}, "thinking-depth: reasoning capability sweep");
+
+	// Feature two is independent of the settings sweep and optional. A broken
+	// notifier must never take down the reasoning fix (or the plugin row).
+	try {
+		installAttention(ctx, isRecord(config) ? config : {});
+	} catch (error) {
+		ctx.logger?.warn?.(
+			"thinking-depth: attention reminders could not start: %s",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
 }

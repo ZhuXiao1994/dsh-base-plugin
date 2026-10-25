@@ -1,8 +1,8 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "private": true,
-  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, so the native effort control works.",
+  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, and raises desktop reminders when a task ends or needs a human decision.",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -12,9 +12,12 @@
   },
   "files": [
     "index.js",
+    "notify.js",
+    "notify-windows.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "icon.png",
     "AGENTS.md",
     "README.md",
     "README.zh-CN.md",
@@ -26,7 +29,7 @@
     }
   },
   "scripts": {
-    "verify": "node tools/verify-host.mjs",
+    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs",
     "pack": "pnpm pack --pack-destination artifacts"
   }
 }

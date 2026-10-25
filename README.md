@@ -2,10 +2,11 @@
 
 English | [中文](README.zh-CN.md)
 
-DSH Thinking Depth is a **host-only plugin** that gives the **third-party models**
-a DeepSeek Harness profile declares by hand their **native** reasoning levels —
-the effort control inside the composer's model picker. It ships no interface of
-its own.
+DSH Thinking Depth is a **host-only plugin** with two independent jobs. It gives
+the **third-party models** a DeepSeek Harness profile declares by hand their
+**native** reasoning levels — the effort control inside the composer's model
+picker — and it raises a **desktop reminder** when a task ends or the agent needs
+a human decision. It ships no interface of its own.
 
 ## Why a hand-declared model has no levels
 
@@ -91,12 +92,49 @@ Every override is a native mechanism:
 | The plugin off entirely | Set the plugin row to `disabled: true` |
 | A different wire format | Set `compat.thinkingFormat` on the model (`openai`, `deepseek`, `openrouter`, `qwen`, …) |
 
+## Task reminders
+
+Feature two is separate from the reasoning sweep and is on by default. It raises
+one **Windows toast** when:
+
+- a turn finishes with `completed`, `error`, `max-tokens` or `blocked` —
+  the toast carries the session title, the failure detail when there is one, and
+  the turn duration;
+- an `ask_user_question` call opens a choice UI — the toast carries the question
+  text and the first few option labels;
+- an approval request is waiting — the toast names the tool and its reason.
+
+A user-initiated stop (`aborted`), a restored session, maintenance and **subagent
+sessions** are silent: the human owns the root conversation, and a chatty child
+would steal the reminder. Only live event appends are observed, so a replayed
+session cannot notify twice. Completion has two sources — the precise
+`agent/status: idle` event and a `turn/end` fallback — and a new `turn/start`
+cancels the pending one, so a task that immediately continues does not produce a
+premature "finished" toast.
+
+The reminder is delivered by Windows PowerShell's WinRT toast API, reusing
+PowerShell's registered AppUserModelID and the bundled `icon.png`. It needs no
+network, no extra dependency, and no Start Menu shortcut. Delivery is
+fire-and-forget: a missing `powershell.exe`, a disabled toast channel, Focus
+Assist, or any other failure is logged at debug level and never affects the
+agent session. The feature is Windows-only; on other platforms the sender is a
+no-op.
+
+To turn reminders off without uninstalling the bundle, override the plugin row in
+the profile's `cordis.patch.yml`:
+
+```yaml
+- id: dsh-thinking-depth
+  config:
+    notifications: false
+```
+
 ## Install
 
 ```powershell
 # Build the tarball from this directory, then install it into the profile.
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.2.2.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.3.0.tgz"
 ```
 
 Restart DSH (or let the host reload its configuration). The plugin is
@@ -117,10 +155,19 @@ the `providers.<route>.models` array is touched; every other field is preserved.
 
 `tools/verify-host.mjs` imports `index.js` directly and drives the planning
 functions with a descriptor shaped like the one `settings.describe()` returns,
-asserting the exact writes the plugin would make.
+asserting the exact writes the plugin would make. `tools/verify-notify.mjs` does
+the same for the reminder builders and for the installer driven by a fake host
+event bus.
 
 ```powershell
 pnpm verify
+```
+
+To check the actual Windows toast channel, run the smoke helper. It raises a real
+toast and waits for the platform to show it:
+
+```powershell
+node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度」通知通道正常。"
 ```
 
 ## Notes and limits
@@ -133,6 +180,12 @@ pnpm verify
   rejects: that one request fails, and you change it back.
 - A pi-ai upgrade can change catalog records; the exact and family tables ship
   inside the plugin and can be updated with it.
+- Reminders are **Windows-only** and intentionally non-interactive: the toast
+  reports what happened but does not activate or focus the DSH window. Windows
+  Focus Assist and the system notification settings can suppress it.
+- Reminders are decided from the root session's own event log. A subagent's
+  completion is visible in the parent's result, so it does not raise its own
+  toast.
 
 ## License
 

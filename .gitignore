@@ -1,6 +1,10 @@
 # Build output — recreate with `pnpm pack`.
 artifacts/
 
+# Installer / test by-products; this package has no dependencies.
+node_modules/
+pnpm-lock.yaml
+
 # Editor / OS noise
 .DS_Store
 Thumbs.db
