@@ -2,11 +2,13 @@
 
 English | [中文](README.zh-CN.md)
 
-DSH Thinking Depth is a **host-only plugin** with two independent jobs. It gives
-the **third-party models** a DeepSeek Harness profile declares by hand their
-**native** reasoning levels — the effort control inside the composer's model
-picker — and it raises a **desktop reminder** when a task ends or the agent needs
-a human decision. It ships no interface of its own.
+DSH Thinking Depth gives the **third-party models** a DeepSeek Harness profile
+declares by hand their **native** reasoning levels — the effort control inside the
+composer's model picker — and raises a **desktop reminder** when a task ends or
+the agent needs a human decision. Both features have their own switch in
+**Settings → Thinking Depth**. The reasoning feature's model editing surface is
+still the native **Settings → Models** page; the plugin does not add a model
+editor.
 
 ## Why a hand-declared model has no levels
 
@@ -56,6 +58,26 @@ them in the native Settings → Models page is quicker.
 Under that rule every route in the current Profile already declares levels, so the
 plugin will not rewrite anything from now on — its job becomes "a brand-new route
 is filled in once, automatically".
+
+## Settings
+
+The plugin contributes one **Thinking Depth** section to the native Settings page.
+
+| Switch | Default | What it does |
+|---|---|---|
+| **Enable thinking levels for third-party models** | on | Fills reasoning levels into new, uncurated `llm-pi-ai` routes. Turning it off stops new fills; levels already written are kept. |
+| **Enable desktop reminders** | on | Shows a Windows toast when a task ends or the agent needs your choice or confirmation. |
+
+Both switches are read live: turning reminders off takes effect immediately, and
+turning the level sweep off or on applies on the next sweep (a settings change
+also triggers one). No restart is needed. The values persist in the profile
+patch, so they survive restarts and are shared by every client of the same
+profile.
+
+The `thinkingDepth` switch is a pause, not a rollback, because the plugin is
+additive-only: deleting levels it wrote would be indistinguishable from deleting
+your own hand-written declarations. To actually remove levels from a route, edit
+them in **Settings → Models**.
 
 ## The shipped rules
 
@@ -120,8 +142,9 @@ Assist, or any other failure is logged at debug level and never affects the
 agent session. The feature is Windows-only; on other platforms the sender is a
 no-op.
 
-To turn reminders off without uninstalling the bundle, override the plugin row in
-the profile's `cordis.patch.yml`:
+To turn reminders off, use **Settings → Thinking Depth → Enable desktop
+reminders**. For a deployment that wants them gone regardless of the UI, the
+profile patch override remains a hard master switch:
 
 ```yaml
 - id: dsh-thinking-depth
@@ -134,12 +157,13 @@ the profile's `cordis.patch.yml`:
 ```powershell
 # Build the tarball from this directory, then install it into the profile.
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.3.0.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.4.0.tgz"
 ```
 
-Restart DSH (or let the host reload its configuration). The plugin is
-host-only, so there is no client bundle to refresh; the new levels may need the
-picker to be reopened.
+Restart DSH after installing or replacing the package. The reasoning sweep is
+host-only, but the Settings section is a browser half: a restart (and the
+resulting page load) is what serves the new client bundle. The new levels may
+need the picker to be reopened.
 
 `dsh plugin` runs pnpm inside the profile, so the same proxy and registry
 settings apply as to any other profile install. `$env:DSH_PROFILE` names the
@@ -147,17 +171,28 @@ profile when the shell was launched by Harness.
 
 ## Where it writes
 
-Writes go through DSH's settings service and persist into the current profile's
-configuration patch — the same path the native Settings → Models page uses. Only
-the `providers.<route>.models` array is touched; every other field is preserved.
+Feature one writes through DSH's settings service and persists into the current
+profile's configuration patch — the same path the native Settings → Models page
+uses. Only the `providers.<route>.models` array is touched; every other field is
+preserved.
+
+The two switches write `thinkingDepth` and `notifications` into the
+`dsh-thinking-depth` entry of the same profile patch. They do not touch any
+provider configuration.
 
 ## Development
 
-`tools/verify-host.mjs` imports `index.js` directly and drives the planning
-functions with a descriptor shaped like the one `settings.describe()` returns,
-asserting the exact writes the plugin would make. `tools/verify-notify.mjs` does
-the same for the reminder builders and for the installer driven by a fake host
-event bus.
+Four offline harnesses run under `pnpm verify`:
+
+- `tools/verify-host.mjs` imports `index.js` and drives the level-planning
+  functions against a descriptor shaped like `settings.describe()`.
+- `tools/verify-notify.mjs` drives the reminder builders and the installer on a
+  fake host event bus, including the live enablement gate.
+- `tools/verify-settings.mjs` checks the handcrafted Config shape, its Cordis
+  validator and the namespace-reader defaults.
+- `tools/verify-client.mjs` executes the real `client/client.js` through a fake
+  client module loader and a minimal React shim, then renders the Settings
+  section in its ready, loading and read-only states.
 
 ```powershell
 pnpm verify
@@ -169,6 +204,10 @@ toast and waits for the platform to show it:
 ```powershell
 node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度」通知通道正常。"
 ```
+
+The client bundle is hand-written in the `window.__ModuleLoader__` form used by
+DSH; there is no build step. The fake-loader test catches wiring and render
+errors, not the final CSS or the real browser module table.
 
 ## Notes and limits
 

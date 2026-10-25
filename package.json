@@ -1,19 +1,22 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, and raises desktop reminders when a task ends or needs a human decision.",
+  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, raises desktop reminders when a task ends or needs a human decision, and exposes both features in Settings.",
   "type": "module",
   "license": "MIT",
   "exports": {
     ".": "./index.js",
+    "./client": "./client/client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "index.js",
+    "settings.js",
     "notify.js",
     "notify-windows.js",
+    "client/client.js",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
@@ -26,10 +29,17 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "scripts": {
-    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs",
+    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs && node tools/verify-settings.mjs && node tools/verify-client.mjs",
     "pack": "pnpm pack --pack-destination artifacts"
   }
 }

@@ -380,7 +380,7 @@ function describe(error) {
  * @returns whether the notifier was installed.
  */
 export function installAttention(ctx, options = {}) {
-	if (options?.notifications === false) return false;
+	if (options?.notifications === false && typeof options.isEnabled !== "function") return false;
 
 	const logger = makeLogger(ctx);
 	const now = typeof options.now === "function" ? options.now : Date.now;
@@ -398,6 +398,18 @@ export function installAttention(ctx, options = {}) {
 						logger,
 						sound: options.sound !== false,
 					});
+	/** Live enablement gate (the Settings switch); errors keep reminders on. */
+	const enabled =
+		typeof options.isEnabled === "function"
+			? options.isEnabled
+			: () => options.notifications !== false;
+	const active = () => {
+		try {
+			return enabled() !== false;
+		} catch {
+			return true;
+		}
+	};
 
 	/** Pending completion timers, keyed by session id. */
 	const pending = new Map();
@@ -422,6 +434,7 @@ export function installAttention(ctx, options = {}) {
 	 */
 	const notify = (key, notification) => {
 		if (!isRecord(notification)) return false;
+		if (!active()) return false;
 		const ts = now();
 		const last = seen.get(key);
 		if (last !== undefined && ts - last < ATTENTION_DEDUPE_MS) return false;
@@ -461,6 +474,7 @@ export function installAttention(ctx, options = {}) {
 		const timer = setTimeout(() => {
 			pending.delete(sessionId);
 			try {
+				if (!active()) return;
 				const turn = lastTurn(session);
 				if (turn === null) return;
 				const notification = buildDoneNotification(session, sessionId, now());
@@ -475,6 +489,7 @@ export function installAttention(ctx, options = {}) {
 
 	const onStatus = (payload) => {
 		try {
+			if (!active()) return;
 			const agent = payload?.agent;
 			const status = payload?.status;
 			if (!isRecord(agent) || typeof status !== "string") return;
@@ -494,6 +509,7 @@ export function installAttention(ctx, options = {}) {
 
 	const onSessionEvent = (session, event) => {
 		try {
+			if (!active()) return;
 			if (!isRecord(event) || typeof event.type !== "string") return;
 			if (!isRootSession(session)) return;
 			const sessionId = sessionIdOf(session);

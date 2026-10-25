@@ -6,24 +6,29 @@ load-bearing.
 
 ## What this is
 
-A **host-only** plugin bundle for DeepSeek Harness with two independent
-features:
+A DeepSeek Harness plugin bundle with two features and one small Settings
+section:
 
 1. It gives the **third-party models** a profile declares by hand under
    `llm-pi-ai` their **native** reasoning levels — the effort control inside the
    composer's model picker.
 2. It raises one **Windows toast** when a task ends or the agent needs a human
    decision. See [Attention reminders](#attention-reminders).
+3. It contributes a **Thinking Depth** section to the native Settings page with
+   one switch per feature. See [Settings](#settings).
 
-It ships no interface. The editing surface for feature one is the native
-**Settings → Models** page. Do not add a settings page; that design was
-explicitly rejected by the user as "not native enough and not dynamic enough".
+The reasoning feature's editing surface is still the native **Settings →
+Models** page; the plugin does not add its own model editor. The section above
+was requested by the user on 2026-10-25 and supersedes the earlier "no settings
+page" decision — do not grow it into a general settings page; keep it to the
+two switches.
 
-- Package: `dsh-thinking-depth` (currently `0.3.0`)
-- Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`
+- Package: `dsh-thinking-depth` (currently `0.4.0`)
+- Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`, `export const Config`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`
-- No client half: no `dsh.client` in `package.json`, no `./client` export
-- Reminder toggle: `config.notifications: false` in a profile patch override
+- Client half: `dsh.client` + `./client` export, one `settings.section`
+- Feature switches: the **Thinking Depth** Settings section (`thinkingDepth`,
+  `notifications`); `config.notifications: false` remains a hard master switch
 
 ## The mechanism you must understand first
 
@@ -53,9 +58,14 @@ the host `settings` service. That is the only viable path; see
 2. **Idempotent.** A sweep over already-filled configuration must produce zero
    ops. The rule tables use canonical keys (`off` included) precisely so that
    what the plugin writes never looks "missing" to itself.
-3. **Host-only.** No `dsh.client`, no `./client`, no UI contribution.
-4. **No DSH/pi-ai imports at runtime.** They are not resolvable from a
-   profile-installed package. Keep the rule tables in-file.
+3. **The browser half is a thin settings surface.** It exists only to render the
+   two switches. It reads and writes the plugin Config through
+   `ctx.configForms`; it must not call host APIs directly, duplicate business
+   logic, or grow additional sections. The host remains authoritative.
+4. **No DSH/pi-ai imports in host code.** They are not resolvable from a
+   profile-installed package. The browser half may only require the client
+   module table's `react` and `@deepseek-ai/dsh-client-ui-primitives`; it must
+   not import DSH packages as ESM.
 5. **`apply()` must never throw.** A thrown `apply` fails the plugin row and
    takes the bundle down.
 6. **Only the `providers.<route>.models` path is written.** Read the list from
@@ -75,26 +85,43 @@ the host `settings` service. That is the only viable path; see
 10. **Reminder content is inert text.** It is built from the session log and
     escaped for PowerShell/XML. Never interpolate it into a shell command
     without the escaping helpers.
+11. **Settings are live and additive.** Both switches are read at use time
+    (`readSettings`/`readSettingsFrom`), not only at `apply()`. Turning
+    `thinkingDepth` off pauses future fills but never deletes levels the plugin
+    already wrote; turning it back on resumes on the next sweep. The field names
+    `thinkingDepth` and `notifications` are persisted in the profile patch —
+    rename only with a migration.
+12. **The Config schema is handcrafted on purpose.** It is not a schemastery
+    instance because `@deepseek-ai/schemastery` is not importable from a profile
+    plugin. Keep only the surface `dsh-settings` reads: `meta`, `type`, `dict`,
+    `toJSON()`, and `"~standard".validate`. Do not replace it with a runtime
+    schema import.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `index.js` | Feature one and entry: rule tables, `capabilityFor()`, `planSweep()`, `apply()` |
+| `index.js` | Entry and host composition: rule tables, `capabilityFor()`, `planSweep()`, `apply()`, Config re-export |
+| `settings.js` | Handcrafted `Config` (two volatile booleans) and live namespace readers |
 | `notify.js` | Feature two: trigger classification, toast builders, dedupe, listener installation |
 | `notify-windows.js` | Windows toast transport: PowerShell script builder, XML/PowerShell escaping, sender |
-| `cordis.patch.yml` | Bundle patch, inserts the row |
+| `client/client.js` | Browser half: the `settings.section` with the two switches |
+| `cordis.patch.yml` | Bundle patch, inserts the host row |
 | `locale/{en,zh}.json` | `meta.title` / `meta.description` for the plugin inventory |
 | `icon.svg` | Inventory icon (SVG, well under 256 KiB) |
 | `icon.png` | 64×64 toast `appLogoOverride` image, generated from `icon.svg` |
 | `tools/verify-host.mjs` | Feature-one offline harness |
 | `tools/verify-notify.mjs` | Feature-two offline harness (fake host event bus) |
+| `tools/verify-settings.mjs` | Config shape, validator and namespace-reader harness |
+| `tools/verify-client.mjs` | Client-section harness through a fake module loader and React shim |
 | `tools/notify-smoke.mjs` | Manual real-toast smoke test (Windows, user-visible) |
-| `package.json` | Manifest; `scripts.verify`, `scripts.pack` |
+| `package.json` | Manifest; `scripts.verify`, `scripts.pack`, `dsh.client` |
 
 Exported for testing, and safe to keep exported from `index.js`:
-`capabilityFor(modelId)` and `planSweep(descriptor)`. From `notify.js`, the pure
-builders and `installAttention(ctx, options)` are exported for the harness.
+`capabilityFor(modelId)`, `planSweep(descriptor)` and `Config`. From
+`notify.js`, the pure builders and `installAttention(ctx, options)` are exported
+for the harness. From `settings.js`, `readSettings`/`readSettingsFrom` and the
+field names are exported for the harness and the host halves.
 
 ## Rule tables
 
@@ -168,8 +195,13 @@ Key rules:
 - **No network, no extra dependency, no shortcut registration.** The helper
   process is capped at 15 s and lingers 2 s after `Show()`; failures only reach
   `logger.debug`.
-- **Opt-out is `config.notifications: false`.** There is no UI and no settings
-  namespace for this; do not add one.
+- **Opt-out is the Settings switch** (`notifications`). `config.notifications:
+  false` in a profile override remains a hard master switch for deployments that
+  want reminders gone; it is not the normal user path.
+- **Feature gate is read live.** `installAttention` registers its listeners even
+  when the switch is off; every event and every pending completion timer checks
+  `isEnabled()` through `readSettings(ctx)`. Turning the switch back on needs no
+  restart.
 
 ### Why the events, not polling
 
@@ -179,6 +211,47 @@ sessions (seed events never publish on `session/event`), which is what makes the
 reminders replay-safe. `session.snapshotEvents()` is used to fold the title and
 the last turn; it is synchronous and available on the object the events carry.
 Do not add a timer-based scan for this feature.
+
+## Settings
+
+The plugin contributes one **Thinking Depth** section to the native Settings
+page. It is the only UI the bundle owns.
+
+| Field | Type | Default | Controls |
+|---|---|---|---|
+| `thinkingDepth` | boolean | `true` | Whether new uncurated `llm-pi-ai` routes get reasoning levels filled in |
+| `notifications` | boolean | `true` | Whether task/question/approval toasts are raised |
+
+How it is wired:
+
+- **Namespace = profile entry id = `dsh-thinking-depth`.** `settings.js` exports
+  the handcrafted `Config`; `index.js` re-exports it so Cordis picks it up.
+- **The Config is not a schemastery instance.** `@deepseek-ai/schemastery` is not
+  importable from a profile plugin. The object carries only what `dsh-settings`
+  reads: `type: "object"`, `meta`, a `dict` of volatile boolean fields,
+  `toJSON()` (inline JSON that schemastery can rehydrate), and a
+  `"~standard".validate` used by Cordis to resolve the entry config.
+- **The client half is `client/client.js`**, exported as `./client` and declared
+  through `dsh.client.platform: "web"` with `dsh-client-locale` and
+  `dsh-client-ui-settings` injected. It is a hand-written
+  `window.__ModuleLoader__.load({ id, factory })` bundle; it requires only
+  `react` and `@deepseek-ai/dsh-client-ui-primitives` from the client module
+  table. It reads/writes the form with `ctx.configForms.get(NS)` and registers a
+  `settings.section` through `settings.section` + `whileServed([NS], ...)`.
+- **Live reads.** The sweep calls `readSettingsFrom(ctx.settings.describe())`
+  after the Loader settles and on every sweep; the notifier calls
+  `readSettings(ctx)` at each event and on each pending completion timer. No
+  restart is needed after a switch changes.
+- **Turning `thinkingDepth` off is a pause, not a rollback.** Levels already
+  written stay, because they are indistinguishable from hand-written
+  declarations and the plugin is additive-only. Turning it on resumes on the
+  next sweep. Document this in user-facing copy.
+- **Writes persist into the profile patch** through the settings service. The
+  client form uses the shared revision/fence, so a concurrent edit produces
+  `SETTINGS_CONFLICT` handling rather than a silent overwrite.
+- **`config.notifications: false` is still a hard master switch** (advanced
+  profile override), and the Settings switch cannot override it. The normal user
+  path is the Settings section.
 
 ## Install — Desktop
 
@@ -221,14 +294,18 @@ Run these in order; each catches a different class of mistake.
 ### 1. Offline behaviour (always)
 
 ```powershell
-pnpm verify        # runs verify-host.mjs and verify-notify.mjs
+pnpm verify        # runs verify-host, verify-notify, verify-settings, verify-client
 ```
 
 `tools/verify-host.mjs` drives `planSweep()` with a descriptor shaped like
 `settings.describe()` and asserts the exact ops. `tools/verify-notify.mjs`
 drives the pure toast builders and installs the notifier on a fake host event
-bus, asserting the root filter, dedupe, cancellation, fallback and cleanup.
-Extend both whenever a rule changes.
+bus, asserting the root filter, dedupe, cancellation, fallback, enablement gate
+and cleanup. `tools/verify-settings.mjs` asserts the handcrafted `Config` shape,
+the validator and the namespace-reader defaults. `tools/verify-client.mjs`
+executes the real `client/client.js` through a fake module loader and a minimal
+React shim, then renders the registered section in its ready/loading/read-only
+states. Extend all four whenever a rule changes.
 
 ### 1b. Real toast delivery (manual, Windows, before shipping a reminder change)
 
@@ -274,6 +351,19 @@ boot fail or log a plugin error. A **live** reminder needs a real agent turn and
 is therefore verified in the desktop profile by the user; the offline harness
 covers the event logic and `tools/notify-smoke.mjs` covers the transport.
 
+The boot also verifies the Settings namespace. Install a temporary probe plugin
+that injects `settings` and, after four seconds, logs
+`ctx.settings.describe()` and calls
+`ctx.settings.mutate("dsh-thinking-depth", [...], revision)`. Expect:
+
+- a row `{ ns: "dsh-thinking-depth", value: { thinkingDepth: true, notifications: true }, revision: 0 }`
+  before the write;
+- after `set` on both fields, the same row with `revision: 1` and
+  `user: { thinkingDepth: false, notifications: false }`.
+
+That proves the handcrafted Config is accepted by the real settings service.
+Remove the probe and scratch profile afterwards; never ship the probe.
+
 Clean up the scratch profile afterwards.
 
 ### 3. What you cannot verify here
@@ -281,6 +371,12 @@ Clean up the scratch profile afterwards.
 The rendered picker. There is no browser control in this environment and the
 running app's HTTP surface needs a token you must not go looking for. State that
 the visual result is unverified; do not claim otherwise.
+
+The Settings section's **visual** rendering and the real client bundle load are
+likewise unverified: `tools/verify-client.mjs` executes the real
+`client/client.js` through a fake loader and React shim, which catches wiring and
+render errors but not CSS or the browser module table. State that the visual
+result is unverified.
 
 The toast's **visual** appearance is likewise unverified: the smoke helper proves
 PowerShell accepted the script and exited 0, not that Windows painted the toast.
@@ -340,6 +436,31 @@ do not fake one by writing events into a session log.
 - **The toast helper needs an interactive desktop session.** A service or
   headless run has nowhere to paint; Focus Assist and per-app notification
   settings can suppress it. There is no fallback channel by design.
+- **The Settings Config is handcrafted, not schemastery.** The host cannot
+  `import("@deepseek-ai/schemastery")`. `dsh-settings` only needs `meta`,
+  `type`, `dict`, `toJSON()` and `"~standard".validate`; changing the shape
+  without testing `volatileForm()`/`describe()` will silently remove the
+  Settings row. `tools/verify-settings.mjs` plus the temporary-probe boot check
+  are the guard.
+- **The client bundle is not built.** `client/client.js` is a hand-written
+  `window.__ModuleLoader__.load` factory. Keep the id equal to the package name,
+  keep `exports["./client"]` and `dsh.client`, and require only `react` /
+  `@deepseek-ai/dsh-client-ui-primitives`. The fake-loader test catches wiring,
+  not real React/CSS.
+- **Settings are read live.** Do not replace `readSettings(ctx)` with the
+  `config` argument captured at `apply()`; that argument is the startup snapshot
+  and would ignore the switch until restart. The settings service's `describe()`
+  is the live read.
+- **`thinkingDepth` off is a pause, not a rollback.** The plugin never deletes
+  levels it wrote (additive-only). Do not add a "revert" path keyed on a
+  provenance marker without a user decision; its own writes look exactly like
+  hand-written declarations.
+- **The client section waits for the namespace through `whileServed`.** If the
+  host is older or the Config shape breaks, the section disappears rather than
+  rendering a broken page. Keep that behavior.
+- **A Settings write reloads or updates the entry.** The notifier's listeners
+  stay registered with an `isEnabled` getter, and the sweep re-reads on its
+  trigger/interval; do not cache the switch in a module-level constant.
 - **Windows console encoding.** Chinese output in this repository is UTF-8;
   read and write files as UTF-8.
 

@@ -11,8 +11,7 @@
  * route that declares no `reasoningEfforts` of its own, it writes the
  * capability the model actually has — read off the shipped pi-ai catalog for
  * the ids that catalog describes, and off the model family's catalog shape
- * otherwise — so the native control lights up and no bespoke settings page is
- * needed.
+ * otherwise — so the native effort control lights up.
  *
  * It only ever ADDS. A model that already declares `reasoningEfforts` — a
  * level map, or `false` for a model that cannot think — is left exactly as
@@ -23,9 +22,16 @@
  * `ask_user_question` call or an approval request — the plugin raises one
  * Windows toast. See `notify.js`; delivery is fire-and-forget and can never
  * fail the agent.
+ *
+ * Both features are switchable from the plugin's own Settings section, backed
+ * by the `settings.js` namespace. The switches are read live; no restart is
+ * needed after turning one off or on.
  */
 
+import { Config, readSettings, readSettingsFrom } from "./settings.js";
 import { installAttention } from "./notify.js";
+
+export { Config };
 
 /** The settings namespace that holds hand-declared provider routes. */
 const SETTINGS_NS = "llm-pi-ai";
@@ -195,7 +201,13 @@ export function apply(ctx, config = {}) {
 		sweeping = true;
 		try {
 			await ctx.root?.loader?.await?.();
-			const descriptor = ctx.settings.describe().find((row) => row.ns === SETTINGS_NS);
+			const descriptors = ctx.settings.describe();
+			const own = readSettingsFrom(descriptors);
+			if (!own.thinkingDepth) {
+				ctx.logger?.debug?.("thinking-depth: reasoning-level sweep is disabled in Settings");
+				return;
+			}
+			const descriptor = descriptors.find((row) => row.ns === SETTINGS_NS);
 			if (descriptor === undefined) return;
 			const { ops, notes, skipped } = planSweep(descriptor);
 			for (const route of skipped) {
@@ -258,9 +270,17 @@ export function apply(ctx, config = {}) {
 	}, "thinking-depth: reasoning capability sweep");
 
 	// Feature two is independent of the settings sweep and optional. A broken
-	// notifier must never take down the reasoning fix (or the plugin row).
+	// notifier must never take down the reasoning fix (or the plugin row). The
+	// live gate reads the Settings switch, so turning reminders off takes effect
+	// without a restart; the static `notifications: false` patch value remains a
+	// hard master switch for profiles that want the feature gone entirely.
 	try {
-		installAttention(ctx, isRecord(config) ? config : {});
+		const staticSettings = isRecord(config) ? config : {};
+		const notificationsAllowed = staticSettings.notifications !== false;
+		installAttention(ctx, {
+			...staticSettings,
+			isEnabled: () => notificationsAllowed && readSettings(ctx).notifications,
+		});
 	} catch (error) {
 		ctx.logger?.warn?.(
 			"thinking-depth: attention reminders could not start: %s",
