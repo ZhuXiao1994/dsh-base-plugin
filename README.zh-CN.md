@@ -1,0 +1,119 @@
+# DSH 思考深度
+
+[English](README.md) | 中文
+
+DSH 思考深度是一个**纯宿主插件**：它让 DeepSeek Harness 中手工声明的**第三方模型**
+获得**原生**的「推理等级」，也就是输入框旁模型选择器里那个控件。它不提供任何自己的
+界面。
+
+## 为什么第三方模型没有原生档位
+
+原生「推理等级」的档位来自适配器报出的模型能力。pi-ai 适配器是**按路由名**去内置
+catalog 里查模型的：
+
+```js
+const defaults = catalogModels(provider)   // provider == 路由名，例如 "commandcode"
+const base = defaults.get(entry.id)        // 手写路由不在 catalog 里 → undefined
+// → reasoning: false
+```
+
+所以自定义网关下的模型在 DSH 眼里一律是「不支持思考」，原生控件的档位是空的。
+而这些模型 id 在 pi-ai 自带 catalog 里其实**是有记录的**——只是挂在别的 provider
+名下，手写路由取不到。
+
+本插件把这份能力在启动时补进配置，原生控件随之可用。
+
+## 它做什么
+
+- **按路由整体判断**：只要某条路由里有**任何一个**模型声明了 `reasoningEfforts`，
+  这条路由就视为**由你手工维护**，整条一律不碰——里面留空的模型是你有意为之。
+- 只有**完全没有声明**的路由才会被处理，而且是一次性整条补齐：对每个模型按规则表写入
+  它应有的档位，必要时同时写入 `compat.thinkingFormat`。
+- **只增不改**：任何已声明 `reasoningEfforts` 的模型——一组档位映射，或表示「不能
+  思考」的 `false`——原样保留。原生「设置 → 模型」页始终是最终裁决者。
+- **触发时机**：启动时、配置变化事件（防抖）、以及每 60 秒一次兜底扫描。配置在运行中
+  被绕过事件改动时（例如直接编辑 profile patch），宿主不会通知插件，最迟 60 秒内由兜底
+  扫描补上。
+- 幂等：补写完成后再扫没有可写项，不会反复写入。
+
+## 一个后果，必须知道
+
+插件自己写的档位，在它眼里同样算「声明」。因此**一条被它补过的路由，此后即被视为手工
+维护**：你之后往这条路由里新加模型，不会被自动补写。要恢复自动接管，把该路由所有模型的
+`reasoningEfforts` 清空即可；只想给单个新模型加档位，直接在原生「设置 → 模型」里勾选
+更方便。
+
+按这条规则，你当前 Profile 里的每条路由都已有声明，所以插件现在不会再改写任何东西——
+它的作用变成「新加的整条路由会被自动补齐一次」。
+
+## 随插件附带的档位规则
+
+按模型 id 精确匹配的条目取自 pi-ai 自带 catalog 中该 id 的记录：
+
+| 模型 id | catalog 中的来源 | 写入的 `reasoningEfforts` | `thinkingFormat` |
+|---|---|---|---|
+| `deepseek/deepseek-v4.1-flash` | openrouter（协议一致） | `off: none, low, high, max` | `openrouter` |
+| `inclusionai/ling-3.0-flash-sante:free` | openrouter（协议一致） | `off, minimal, low, medium, high` | `openrouter` |
+| `poolside/laguna-s-2.1-free` | vercel-ai-gateway（协议不同） | `off, minimal, low, medium, high` | 不写 |
+| `claude-opus-5-5` | anthropic（协议不同） | `off, low, medium, high, xhigh, max` | 不写 |
+
+`thinkingFormat` 只在 catalog 记录的协议与路由协议一致时写入——这也是 `llm-pi-ai`
+自己继承 catalog compat 块时的判据。
+
+未精确匹配的模型走家族规则（`claude`、`deepseek`、`gpt-*`/`o1+`、`gemini`、`glm`/`zai`、
+`kimi`/`moonshot`、`grok`、`mistral`），这些规则是从 catalog 中所有
+`openai-completions` 推理模型归纳出来的；家族规则**只补档位、不写 wire 格式**。
+其余模型补一组最通用的 OpenAI 兼容档位 `off, low, medium, high`。
+
+## 如何覆盖它的判断
+
+| 想要的效果 | 做法（全部是原生机制） |
+|---|---|
+| 某个模型不该有思考档位 | 在「设置 → 模型」把该模型的推理档位关掉（写入 `reasoningEfforts: false`） |
+| 某个模型只给部分档位 | 在「设置 → 模型」手工勾选（写入完整映射），插件不再改动它 |
+| 整条路由都由我手工维护 | 在该路由任意一个模型上声明 `reasoningEfforts`，整条路由即被跳过 |
+| 让插件重新接管一条路由 | 清空该路由所有模型的 `reasoningEfforts` |
+| 彻底停用插件 | 把插件行设为 `disabled: true` |
+| 换用别的 wire 格式 | 在模型上写 `compat.thinkingFormat`（`openai`、`deepseek`、`openrouter`、`qwen` 等） |
+
+## 安装
+
+```powershell
+# 在本目录打出压缩包，然后安装到当前 Profile
+pnpm pack --pack-destination artifacts
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.2.2.tgz"
+```
+
+重启 DSH（或等宿主重载配置）后生效。插件是宿主插件，没有客户端 bundle，因此不需要
+刷新页面来加载它；但原生档位出现在选择器里可能需要重新打开一次选择器。
+
+`dsh plugin` 会在 Profile 目录内运行 pnpm，因此代理与 registry 设置与其他 Profile
+安装一致。由 Harness 启动的终端里 `$env:DSH_PROFILE` 就是当前 Profile，也可以不带
+`--profile`。
+
+## 写到哪里
+
+写入通过 DSH 的设置服务完成，持久化到当前 Profile 的配置补丁（与原生「设置 → 模型」
+页同一条路径），只改 `providers.<路由>.models` 这一个数组，其他字段原样保留。
+
+## 开发
+
+`tools/verify-host.mjs` 直接导入 `index.js`，用一个形状与 `settings.describe()`
+相同的描述符驱动规划函数，断言将要写入的确切内容。
+
+```powershell
+pnpm verify
+```
+
+## 说明与限制
+
+- 只处理声明了 `models` 列表的路由；`models` 位于更低配置层（不在 Profile 补丁里）
+  时不做改动，因为没有可扩展的清单。
+- 家族规则与兜底规则是**推断**：它们只增加选择器里的选项，不会改变路由默认值，
+  因此唯一风险是你主动选了一个网关不接受的档位——那一次请求会失败，改回即可。
+- pi-ai 升级后 catalog 记录可能变化；精确条目与家族规则都来自本插件内置的表，
+  需要时可随插件一起更新。
+
+## 许可证
+
+MIT。

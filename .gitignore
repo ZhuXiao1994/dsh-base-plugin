@@ -1,0 +1,7 @@
+# Build output — recreate with `pnpm pack`.
+artifacts/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log

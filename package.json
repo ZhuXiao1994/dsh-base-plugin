@@ -1,0 +1,32 @@
+{
+  "name": "dsh-thinking-depth",
+  "version": "0.2.2",
+  "private": true,
+  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, so the native effort control works.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "AGENTS.md",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "verify": "node tools/verify-host.mjs",
+    "pack": "pnpm pack --pack-destination artifacts"
+  }
+}
