@@ -13,9 +13,9 @@ section:
    `llm-pi-ai` their **native** reasoning levels — the effort control inside the
    composer's model picker.
 2. It raises one **Windows toast** when a task ends or the agent needs a human
-   decision. See [Attention reminders](#attention-reminders).
-3. It contributes a **Thinking Depth** section to the native Settings page with
-   one switch per feature. See [Settings](#settings).
+   decision. See [Desktop reminders](#desktop-reminders).
+3. It contributes a **Thinking Depth & Notifications** section to the native
+   Settings page with one switch per feature. See [Settings](#settings).
 
 The reasoning feature's editing surface is still the native **Settings →
 Models** page; the plugin does not add its own model editor. The section above
@@ -23,12 +23,14 @@ was requested by the user on 2026-10-25 and supersedes the earlier "no settings
 page" decision — do not grow it into a general settings page; keep it to the
 two switches.
 
-- Package: `dsh-thinking-depth` (currently `0.4.0`)
+- Package: `dsh-thinking-depth` (currently `0.4.1`); the display name is
+  **Thinking Depth & Notifications**, and the internal id stays for compatibility
 - Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`, `export const Config`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`
 - Client half: `dsh.client` + `./client` export, one `settings.section`
-- Feature switches: the **Thinking Depth** Settings section (`thinkingDepth`,
-  `notifications`); `config.notifications: false` remains a hard master switch
+- Feature switches: the **Thinking Depth & Notifications** Settings section
+  (`thinkingDepth`, `notifications`); `config.notifications: false` remains a
+  hard master switch
 
 ## The mechanism you must understand first
 
@@ -155,7 +157,7 @@ To mine a new family, index every entry whose `api` is
 levels the family agrees on. Put the reduction in `FAMILY_RULES`; put a single
 id in `EXACT_RULES` only when you have its catalog record in hand.
 
-## Attention reminders
+## Desktop reminders
 
 `notify.js` installs two root-scoped listeners and one Windows transport. Its
 contract is deliberately narrower than a general notification framework:
@@ -214,8 +216,8 @@ Do not add a timer-based scan for this feature.
 
 ## Settings
 
-The plugin contributes one **Thinking Depth** section to the native Settings
-page. It is the only UI the bundle owns.
+The plugin contributes one **Thinking Depth & Notifications** section to the
+native Settings page. It is the only UI the bundle owns.
 
 | Field | Type | Default | Controls |
 |---|---|---|---|
@@ -310,7 +312,7 @@ states. Extend all four whenever a rule changes.
 ### 1b. Real toast delivery (manual, Windows, before shipping a reminder change)
 
 ```powershell
-node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度」通知通道正常。"
+node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度与消息推送」通知通道正常。"
 ```
 
 This starts the real `powershell.exe` WinRT path, so a toast should appear on

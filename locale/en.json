@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Thinking Depth",
+    "title": "Thinking Depth & Notifications",
     "description": "Supplies native reasoning levels for hand-declared third-party models and raises a Windows toast when a task ends or needs a decision. Both features are switchable in Settings."
   }
 }

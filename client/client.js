@@ -1,6 +1,6 @@
 /**
- * Browser half of the Thinking Depth bundle: the plugin's own Settings
- * section with its two switches.
+ * Browser half of the Thinking Depth & Notifications bundle: the plugin's own
+ * Settings section with its two switches.
  *
  * This file is served as the package's `./client` export and is wrapped in the
  * DSH client module loader by hand (no build step). It imports only modules
@@ -24,8 +24,8 @@ window.__ModuleLoader__.load({
 		const NS = "dsh-thinking-depth";
 
 		const en = {
-			nav: "Thinking Depth",
-			title: "Thinking Depth",
+			nav: "Thinking & Notifications",
+			title: "Thinking Depth & Notifications",
 			intro: "Controls the plugin's two features. Changes take effect immediately.",
 			thinkingDepth: "Enable thinking levels for third-party models",
 			thinkingDepthHint:
@@ -40,8 +40,8 @@ window.__ModuleLoader__.load({
 		};
 
 		const zh = {
-			nav: "思考深度",
-			title: "思考深度",
+			nav: "思考与消息",
+			title: "思考深度与消息推送",
 			intro: "控制本插件的两个功能，修改后立即生效。",
 			thinkingDepth: "启用非官方模型的思考深度",
 			thinkingDepthHint:

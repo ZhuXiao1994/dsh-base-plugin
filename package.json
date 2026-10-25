@@ -1,8 +1,8 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
-  "description": "Gives third-party models in a DeepSeek Harness profile the reasoning levels the installed catalog cannot supply, raises desktop reminders when a task ends or needs a human decision, and exposes both features in Settings.",
+  "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, raises desktop reminders when a task ends or needs a decision, and exposes both features in Settings.",
   "type": "module",
   "license": "MIT",
   "exports": {

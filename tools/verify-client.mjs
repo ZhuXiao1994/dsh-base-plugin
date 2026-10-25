@@ -144,7 +144,7 @@ function collect(node, predicate, out = []) {
 	assert.equal(registration.meta.id, "thinking-depth");
 	assert.equal(registration.meta.order, 35);
 	assert.equal(registration.meta.locale, NS);
-	assert.equal(registration.meta.label(), "思考深度");
+	assert.equal(registration.meta.label(), "思考与消息");
 
 	const tree = registration.component(registration.meta.inject());
 	const text = textOf(tree);
