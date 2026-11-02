@@ -1,5 +1,5 @@
 /**
- * Host half of the Thinking Depth bundle.
+ * Host half of the Thinking Depth & Notifications bundle.
  *
  * Feature one — reasoning levels. A hand-declared pi-ai route gets no
  * reasoning metadata from the installed catalog: `llm-pi-ai` looks a model up
@@ -17,19 +17,21 @@
  * level map, or `false` for a model that cannot think — is left exactly as
  * configured, so the native Settings → Models page stays the final authority.
  *
- * Feature two — attention reminders. When a task finishes (completed, failed,
- * over its output limit, or blocked) or the agent opens a choice UI — an
+ * Feature two — reminders. When a task finishes (completed, failed, over its
+ * output limit, or blocked) or the agent opens a choice UI — an
  * `ask_user_question` call or an approval request — the plugin raises one
- * Windows toast. See `notify.js`; delivery is fire-and-forget and can never
- * fail the agent.
+ * notification. Delivery is split between local Windows toasts and SMTP email
+ * by `delivery.js`; each channel is fire-and-forget and can never fail the
+ * agent.
  *
- * Both features are switchable from the plugin's own Settings section, backed
+ * Both features are configured from the plugin's own Settings section, backed
  * by the `settings.js` namespace. The switches are read live; no restart is
- * needed after turning one off or on.
+ * needed after changing delivery.
  */
 
 import { Config, readSettings, readSettingsFrom } from "./settings.js";
 import { installAttention } from "./notify.js";
+import { createDelivery } from "./delivery.js";
 
 export { Config };
 
@@ -271,19 +273,29 @@ export function apply(ctx, config = {}) {
 
 	// Feature two is independent of the settings sweep and optional. A broken
 	// notifier must never take down the reasoning fix (or the plugin row). The
-	// live gate reads the Settings switch, so turning reminders off takes effect
-	// without a restart; the static `notifications: false` patch value remains a
-	// hard master switch for profiles that want the feature gone entirely.
+	// live gate reads the Settings channels, so turning local or email delivery
+	// off takes effect without a restart; the static `notifications: false`
+	// patch value remains a hard master switch for profiles that want every
+	// reminder channel gone.
 	try {
 		const staticSettings = isRecord(config) ? config : {};
 		const notificationsAllowed = staticSettings.notifications !== false;
+		const deliver = createDelivery(ctx, {
+			allow: () => notificationsAllowed,
+			sound: staticSettings.sound !== false,
+		});
 		installAttention(ctx, {
 			...staticSettings,
-			isEnabled: () => notificationsAllowed && readSettings(ctx).notifications,
+			isEnabled: () => {
+				if (!notificationsAllowed) return false;
+				const live = readSettings(ctx);
+				return live.notifications || live.email;
+			},
+			send: deliver,
 		});
 	} catch (error) {
 		ctx.logger?.warn?.(
-			"thinking-depth: attention reminders could not start: %s",
+			"thinking-depth: reminders could not start: %s",
 			error instanceof Error ? error.message : String(error),
 		);
 	}

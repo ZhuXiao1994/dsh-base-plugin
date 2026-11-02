@@ -5,19 +5,20 @@ English | [中文](README.zh-CN.md)
 DSH Thinking Depth & Notifications is a DeepSeek Harness plugin with two
 features and one small Settings section. It gives the **third-party models** a
 profile declares by hand their **native** reasoning levels — the effort control
-inside the composer's model picker — and it raises a **desktop reminder** when a
-task ends or the agent needs a human decision.
+inside the composer's model picker — and it raises **reminders** when a task ends
+or the agent needs a human decision. Reminders can go to a local Windows toast,
+to email, or both.
 
-Both features have their own switch in **Settings → Thinking & Notifications**.
+Both features have their own switches in **Settings → Thinking & Notifications**.
 The reasoning feature's model editing surface is still the native **Settings →
 Models** page; the plugin does not add a model editor.
 
 ## Features
 
-| Feature | What it does | Switch |
+| Feature | What it does | Settings |
 |---|---|---|
 | **Reasoning levels** | Fills the reasoning levels a hand-declared `llm-pi-ai` route is missing, so the native effort control works. | Enable thinking levels for third-party models |
-| **Desktop reminders** | Raises a Windows toast when a task finishes, asks a question, or waits for approval. | Enable desktop reminders |
+| **Reminders** | Raises a notification when a task finishes, asks a question, or waits for approval. | Local notifications and Email notifications, with SMTP details |
 
 The internal package name and settings namespace remain `dsh-thinking-depth` for
 compatibility; the display name and Settings section cover both features.
@@ -27,24 +28,42 @@ compatibility; the display name and Settings section cover both features.
 The plugin contributes one **Thinking Depth & Notifications** section to the
 native Settings page.
 
-| Switch | Default | What it does |
+| Control | Default | What it does |
 |---|---|---|
 | **Enable thinking levels for third-party models** | on | Fills reasoning levels into new, uncurated `llm-pi-ai` routes. Turning it off stops new fills; levels already written are kept. |
-| **Enable desktop reminders** | on | Shows a Windows toast when a task ends or the agent needs your choice or confirmation. |
+| **Local notifications** | on | Shows a Windows toast on the computer running DSH. |
+| **Email notifications** | off | Sends reminders through SMTP to the configured mailbox. |
 
-Both switches are read live: turning reminders off takes effect immediately, and
-turning the level sweep off or on applies on the next sweep (a settings change
-also triggers one). No restart is needed. The values persist in the profile
-patch, so they survive restarts and are shared by every client of the same
-profile.
+Selecting both delivery methods sends the same reminder twice, once per channel.
+Reminders are read live: channel changes take effect immediately, and turning the
+level sweep off or on applies on the next sweep (a settings change also triggers
+one). No restart is needed. The values persist in the profile patch, so they
+survive restarts and are shared by every client of the same profile.
+
+When **Email notifications** is on, the SMTP form has these fields:
+
+| Field | Notes |
+|---|---|
+| SMTP server | For example `smtp.qq.com` or `smtp.gmail.com`. |
+| Port | `465` usually uses SSL/TLS; `587` usually uses STARTTLS. |
+| SSL/TLS | Turn on for implicit TLS (port 465). Leave off for STARTTLS (port 587). |
+| Username | SMTP login name. Leave user and password empty for a relay without authentication. |
+| Password | App password or authorization code. It is write-only in the UI: it is never sent back to the browser after saving. |
+| From | Sender address. |
+| To | One or more recipients, comma-separated. |
+
+Use an app-specific password rather than your normal mailbox password. The
+password is a write-only settings field over the remote API, but it is still
+stored in the local profile configuration patch; the UI cannot read it back, but
+the local file can.
 
 The `thinkingDepth` switch is a pause, not a rollback, because the plugin is
 additive-only: deleting levels it wrote would be indistinguishable from deleting
 your own hand-written declarations. To actually remove levels from a route, edit
 them in **Settings → Models**.
 
-For a deployment that wants reminders gone regardless of the UI, the profile
-patch override remains a hard master switch:
+For a deployment that wants every reminder channel gone regardless of the UI,
+the profile patch override remains a hard master switch:
 
 ```yaml
 - id: dsh-thinking-depth
@@ -138,17 +157,17 @@ Every override is a native mechanism:
 | The plugin off entirely | Set the plugin row to `disabled: true` |
 | A different wire format | Set `compat.thinkingFormat` on the model (`openai`, `deepseek`, `openrouter`, `qwen`, …) |
 
-## Desktop reminders
+## Reminders
 
 The reminder feature is separate from the reasoning sweep and is on by default.
-It raises one **Windows toast** when:
+It raises reminders when:
 
 - a turn finishes with `completed`, `error`, `max-tokens` or `blocked` —
-  the toast carries the session title, the failure detail when there is one, and
-  the turn duration;
-- an `ask_user_question` call opens a choice UI — the toast carries the question
-  text and the first few option labels;
-- an approval request is waiting — the toast names the tool and its reason.
+  the reminder carries the session title, the failure detail when there is one,
+  and the turn duration;
+- an `ask_user_question` call opens a choice UI — the reminder carries the
+  question text and the first few option labels;
+- an approval request is waiting — the reminder names the tool and its reason.
 
 A user-initiated stop (`aborted`), a restored session, maintenance and **subagent
 sessions** are silent: the human owns the root conversation, and a chatty child
@@ -156,29 +175,43 @@ would steal the reminder. Only live event appends are observed, so a replayed
 session cannot notify twice. Completion has two sources — the precise
 `agent/status: idle` event and a `turn/end` fallback — and a new `turn/start`
 cancels the pending one, so a task that immediately continues does not produce a
-premature "finished" toast.
+premature "finished" reminder.
 
-The reminder is delivered by Windows PowerShell's WinRT toast API, reusing
-PowerShell's registered AppUserModelID and the bundled `icon.png`. It needs no
-network, no extra dependency, and no Start Menu shortcut. Delivery is
-fire-and-forget: a missing `powershell.exe`, a disabled toast channel, Focus
-Assist, or any other failure is logged at debug level and never affects the
-agent session. The feature is Windows-only; on other platforms the sender is a
-no-op. To turn it off, use **Settings → Thinking & Notifications → Enable desktop
-reminders**.
+Each accepted reminder is dispatched to every enabled channel independently:
+
+- **Local notifications** use Windows PowerShell's WinRT toast API, reusing
+  PowerShell's registered AppUserModelID and the bundled `icon.png`. It needs no
+  network and no Start Menu shortcut. The feature is Windows-only; on other
+  platforms this channel is a no-op.
+- **Email notifications** use SMTP through `nodemailer`. The message is a plain
+  text mail with the reminder title as the subject, the reminder body, the local
+  time, and the plugin name. STARTTLS is required for non-SSL connections;
+  port 465 uses implicit TLS. The SMTP password is read only on the Host and is
+  never included in the mail or a log line.
+
+Delivery is fire-and-forget and isolated per channel: a missing
+`powershell.exe`, Focus Assist, an unreachable SMTP server, a refused login, or
+a missing `nodemailer` install is logged at debug level and never affects the
+agent session or the other channel. To change the channels or configure the
+mailbox, use **Settings → Thinking & Notifications**.
 
 ## Install
 
 ```powershell
 # Build the tarball from this directory, then install it into the profile.
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.4.1.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.0.tgz"
 ```
 
 Restart DSH after installing or replacing the package. The reasoning sweep is
 host-side, but the Settings section is a browser half: a restart (and the
 resulting page load) is what serves the new client bundle. The new levels may
 need the picker to be reopened.
+
+Email support declares `nodemailer` as a normal package dependency, so
+`dsh plugin add` installs it with the plugin. If the dependency is unavailable,
+local notifications and the reasoning feature still work; only the email channel
+is disabled.
 
 `dsh plugin` runs pnpm inside the profile, so the same proxy and registry
 settings apply as to any other profile install. `$env:DSH_PROFILE` names the
@@ -191,20 +224,25 @@ current profile's configuration patch — the same path the native Settings → 
 page uses. Only the `providers.<route>.models` array is touched; every other field
 is preserved.
 
-The two **switches** write `thinkingDepth` and `notifications` into the
-`dsh-thinking-depth` entry of the same profile patch. They do not touch any
-provider configuration.
+The **settings** write `thinkingDepth`, `notifications`, `email`, the SMTP fields
+and the write-only `smtpPass` into the `dsh-thinking-depth` entry of the same
+profile patch. They do not touch any provider configuration.
 
 ## Development
 
-Four offline harnesses run under `pnpm verify`:
+Six offline harnesses run under `pnpm verify`:
 
 - `tools/verify-host.mjs` imports `index.js` and drives the level-planning
   functions against a descriptor shaped like `settings.describe()`.
 - `tools/verify-notify.mjs` drives the reminder builders and the installer on a
   fake host event bus, including the live enablement gate.
 - `tools/verify-settings.mjs` checks the handcrafted Config shape, its Cordis
-  validator and the namespace-reader defaults.
+  validator, the secret field and the namespace-reader defaults.
+- `tools/verify-email.mjs` checks recipient parsing, SMTP configuration
+  completeness, mail text and the exact nodemailer options through a fake
+  transport.
+- `tools/verify-delivery.mjs` checks that local and email channels are selected
+  live and that one failing channel never suppresses the other.
 - `tools/verify-client.mjs` executes the real `client/client.js` through a fake
   client module loader and a minimal React shim, then renders the Settings
   section in its ready, loading and read-only states.
@@ -234,12 +272,19 @@ errors, not the final CSS or the real browser module table.
   rejects: that one request fails, and you change it back.
 - A pi-ai upgrade can change catalog records; the exact and family tables ship
   inside the plugin and can be updated with it.
-- Reminders are **Windows-only** and intentionally non-interactive: the toast
-  reports what happened but does not activate or focus the DSH window. Windows
-  Focus Assist and the system notification settings can suppress it.
+- **Local** reminders are Windows-only and intentionally non-interactive: the
+  toast reports what happened but does not activate or focus the DSH window.
+  Windows Focus Assist and the system notification settings can suppress it.
+- **Email** reminders need outbound SMTP access. They are plain-text mail and
+  are not retried after a failure; check the SMTP settings if mail stops
+  arriving. Use an app password or authorization code, not your normal account
+  password.
+- The SMTP password is redacted from remote settings reads, but it is still
+  stored in the local profile configuration patch. Treat the profile directory
+  as sensitive.
 - Reminders are decided from the root session's own event log. A subagent's
   completion is visible in the parent's result, so it does not raise its own
-  toast.
+  reminder.
 
 ## License
 

@@ -1,8 +1,8 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
-  "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, raises desktop reminders when a task ends or needs a decision, and exposes both features in Settings.",
+  "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, raises local and email reminders when a task ends or needs a decision, and exposes all of it in Settings.",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -16,6 +16,8 @@
     "settings.js",
     "notify.js",
     "notify-windows.js",
+    "email.js",
+    "delivery.js",
     "client/client.js",
     "cordis.patch.yml",
     "locale/*.json",
@@ -33,13 +35,17 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-settings"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
       ],
       "platform": "web"
     }
   },
+  "dependencies": {
+    "nodemailer": "^10.3.1"
+  },
   "scripts": {
-    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs && node tools/verify-settings.mjs && node tools/verify-client.mjs",
+    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs && node tools/verify-settings.mjs && node tools/verify-email.mjs && node tools/verify-delivery.mjs && node tools/verify-client.mjs",
     "pack": "pnpm pack --pack-destination artifacts"
   }
 }

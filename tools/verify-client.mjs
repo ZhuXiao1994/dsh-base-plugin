@@ -22,6 +22,9 @@ const fakeReact = {
 	useCallback: (callback) => callback,
 	useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
 	useState: (initial) => [initial, () => {}],
+	useEffect: (callback) => {
+		callback();
+	},
 };
 
 const Switch = (props) => ({ type: "Switch", props, children: [] });
@@ -56,7 +59,7 @@ const bundle = moduleDefinition.factory((id) => {
 
 assert.equal(typeof bundle.apply, "function");
 assert.equal(bundle.name, NS);
-assert.deepEqual(bundle.inject, ["slots", "locale", "configForms"]);
+assert.deepEqual(bundle.inject, ["slots", "locale", "configForms", "remote", "remote.settings"]);
 assert.equal(styleTags.length, 1, "the stylesheet is injected once");
 
 /** Minimal fake config form over one fixed snapshot. */
@@ -74,7 +77,7 @@ function makeForm(snapshot) {
 }
 
 /** Install the bundle on a fake client context and return its registration. */
-function mount(form) {
+function mount(form, remote) {
 	const dictionaries = {};
 	let registered;
 	const ctx = {
@@ -100,6 +103,11 @@ function mount(form) {
 			register(meta, component) {
 				registered = { meta, component };
 				return () => {};
+			},
+		},
+		remote: remote ?? {
+			settings: {
+				describe: async () => ({ ok: false }),
 			},
 		},
 		effect(callback) {
@@ -131,11 +139,21 @@ function collect(node, predicate, out = []) {
 	return out;
 }
 
-// 1. Ready state: both switches render with their labels and hints.
+// 1. Ready state: all switches render with their labels and hints.
 {
 	const form = makeForm({
 		status: "ready",
-		value: { thinkingDepth: true, notifications: true },
+		value: {
+			thinkingDepth: true,
+			notifications: true,
+			email: false,
+			smtpHost: "",
+			smtpPort: 587,
+			smtpSecure: false,
+			smtpUser: "",
+			emailFrom: "",
+			emailTo: "",
+		},
 		writable: true,
 		revision: 0,
 	});
@@ -148,17 +166,64 @@ function collect(node, predicate, out = []) {
 
 	const tree = registration.component(registration.meta.inject());
 	const text = textOf(tree);
-	assert.match(text, /思考深度/u);
+	assert.match(text, /思考深度与消息推送/u);
 	assert.match(text, /启用非官方模型的思考深度/u);
-	assert.match(text, /启用消息推送/u);
+	assert.match(text, /本地通知/u);
+	assert.match(text, /邮箱推送/u);
+	assert.match(text, /提醒方式/u);
 
 	const switches = collect(tree, (node) => node.type === "Switch");
-	assert.equal(switches.length, 2);
-	assert.equal(switches.every((node) => node.props.checked === true), true);
+	assert.equal(switches.length, 3);
+	assert.equal(switches.every((node) => node.props.checked === true), false);
+	assert.equal(switches[2].props.checked, false, "email starts off");
 	assert.equal(switches.every((node) => node.props.disabled === false), true);
 
 	switches[0].props.onChange(false);
 	assert.deepEqual(form.calls, [["thinkingDepth", false]]);
+}
+
+// 1b. Enabling email reveals the SMTP form and its save action.
+{
+	const form = makeForm({
+		status: "ready",
+		value: {
+			thinkingDepth: true,
+			notifications: true,
+			email: true,
+			smtpHost: "",
+			smtpPort: 587,
+			smtpSecure: false,
+			smtpUser: "",
+			emailFrom: "",
+			emailTo: "",
+		},
+		writable: true,
+		revision: 0,
+	});
+	const remote = {
+		settings: {
+			describe: async () => ({
+				ok: true,
+				value: {
+					namespaces: [
+						{ ns: NS, secrets: [{ path: ["smtpPass"], set: true }] },
+					],
+				},
+			}),
+		},
+	};
+	const registration = mount(form, remote);
+	const tree = registration.component(registration.meta.inject());
+	const text = textOf(tree);
+	assert.match(text, /邮箱设置（SMTP）/u);
+	assert.match(text, /SMTP 服务器/u);
+	assert.match(text, /发件人/u);
+	assert.match(text, /收件人/u);
+	assert.match(text, /保存邮箱设置/u);
+	const inputs = collect(tree, (node) => node.type === "input");
+	assert.ok(inputs.length >= 6, "SMTP fields are rendered");
+	const buttons = collect(tree, (node) => node.type === "button");
+	assert.ok(buttons.some((node) => textOf(node).includes("保存邮箱设置")));
 }
 
 // 2. Loading, read-only and unavailable states are explained and disabled.

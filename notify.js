@@ -441,7 +441,7 @@ export function installAttention(ctx, options = {}) {
 		seen.set(key, ts);
 		pruneSeen(ts);
 		try {
-			const result = send(notification);
+			const result = send({ ...notification, ts });
 			if (result !== null && typeof result?.then === "function") {
 				result.then(undefined, (error) => {
 					logger.debug("thinking-depth: notification send rejected: %s", describe(error));
