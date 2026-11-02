@@ -1,6 +1,6 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, raises local and email reminders when a task ends or needs a decision, and exposes all of it in Settings.",
   "type": "module",

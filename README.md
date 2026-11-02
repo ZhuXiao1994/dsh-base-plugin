@@ -200,7 +200,7 @@ mailbox, use **Settings → Thinking & Notifications**.
 ```powershell
 # Build the tarball from this directory, then install it into the profile.
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.0.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
 ```
 
 Restart DSH after installing or replacing the package. The reasoning sweep is

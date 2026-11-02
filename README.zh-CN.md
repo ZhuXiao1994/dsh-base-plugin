@@ -167,7 +167,7 @@ SMTP 服务器不可达、登录失败或 `nodemailer` 未安装，都只记 deb
 ```powershell
 # 在本目录打出压缩包，然后安装到当前 Profile
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.0.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
 ```
 
 安装或替换后需要重启 DSH。推理扫描是宿主侧逻辑，但设置页是浏览器侧 bundle，重启后

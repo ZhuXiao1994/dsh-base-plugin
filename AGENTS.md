@@ -23,7 +23,7 @@ was requested by the user on 2026-10-25 and supersedes the earlier "no settings
 page" decision — do not grow it beyond the feature switches and the email
 configuration it needs.
 
-- Package: `dsh-thinking-depth` (currently `0.5.0`); the display name is
+- Package: `dsh-thinking-depth` (currently `0.5.1`); the display name is
   **Thinking Depth & Notifications**, and the internal id stays for compatibility
 - Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`, `export const Config`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`

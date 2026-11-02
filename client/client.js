@@ -347,12 +347,16 @@ window.__ModuleLoader__.load({
 				}
 			};
 
+			const savedUser = String(value.smtpUser ?? "").trim();
+			const authComplete = savedUser === "" ? !secretSet : secretSet;
 			const emailConfigured =
 				String(value.smtpHost ?? "").trim() !== "" &&
 				String(value.emailFrom ?? "").trim() !== "" &&
 				String(value.emailTo ?? "").trim() !== "" &&
 				Number.isInteger(value.smtpPort) &&
-				(String(value.smtpUser ?? "").trim() === "" || secretSet);
+				value.smtpPort >= 1 &&
+				value.smtpPort <= 65535 &&
+				authComplete;
 
 			let status = null;
 			if (snapshot.status === "unavailable") {
