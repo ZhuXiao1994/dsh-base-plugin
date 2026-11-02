@@ -23,7 +23,7 @@ was requested by the user on 2026-10-25 and supersedes the earlier "no settings
 page" decision — do not grow it beyond the feature switches and the email
 configuration it needs.
 
-- Package: `dsh-thinking-depth` (currently `0.5.1`); the display name is
+- Package: `dsh-thinking-depth` (currently `0.7.0`); the display name is
   **Thinking Depth & Notifications**, and the internal id stays for compatibility
 - Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`, `export const Config`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`
@@ -113,6 +113,16 @@ the host `settings` service. That is the only viable path; see
 14. **Email failures are isolated and not retried.** One notification is one
     attempt per enabled channel. A dead SMTP connection must not stop the local
     toast, block the agent, or queue a retry loop.
+15. **The test send is a loopback-only route, not a settings write.** The client
+    POSTs `/dsh-thinking-depth/test-email` with `x-dsh-test-email: 1`; the route
+    rejects non-loopback peers, other methods, and non-JSON bodies. It reads the
+    live settings and returns the exact SMTP result in the response. Do not
+    reintroduce a settings-field handshake: a settings write runs inside an HMR
+    transaction, so a result written from that event is rejected and the button
+    appears to hang.
+16. **The sender falls back to the SMTP username.** `emailFromAddress()` accepts
+    `emailFrom` only when it is a real address; otherwise it uses a valid
+    `smtpUser`. A bare nickname in From must not disable email delivery.
 
 ## Layout
 
@@ -124,7 +134,8 @@ the host `settings` service. That is the only viable path; see
 | `notify-windows.js` | Local toast transport: PowerShell script builder, XML/PowerShell escaping, sender |
 | `email.js` | SMTP transport: config validation, recipient parsing, mail text, nodemailer sender |
 | `delivery.js` | Per-notification channel dispatch to local and email, isolated per channel |
-| `client/client.js` | Browser half: the `settings.section` with switches and the SMTP form |
+| `test-email.js` | Loopback test-send route: guards, SMTP attempt, JSON result |
+| `client/client.js` | Browser half: the `settings.section` with switches, the SMTP form and the test button |
 | `cordis.patch.yml` | Bundle patch, inserts the host row |
 | `locale/{en,zh}.json` | `meta.title` / `meta.description` for the plugin inventory |
 | `icon.svg` | Inventory icon (SVG, well under 256 KiB) |
@@ -134,6 +145,7 @@ the host `settings` service. That is the only viable path; see
 | `tools/verify-settings.mjs` | Config shape, validator, secret and namespace-reader harness |
 | `tools/verify-email.mjs` | SMTP configuration, mail text and sender harness (fake transport) |
 | `tools/verify-delivery.mjs` | Local/email channel selection and failure-isolation harness |
+| `tools/verify-test-email.mjs` | Loopback test-route guards and result harness |
 | `tools/verify-client.mjs` | Client-section harness through a fake module loader and React shim |
 | `tools/notify-smoke.mjs` | Manual real-toast smoke test (Windows, user-visible) |
 | `package.json` | Manifest; `scripts.verify`, `scripts.pack`, `dsh.client`, `nodemailer` dependency |
@@ -220,8 +232,9 @@ Key rules:
 - **Email transport is SMTP-only.** `email.js` accepts configured host, port,
   TLS mode, optional username/password, from and comma-separated recipients;
   `requireTLS` is on for non-SSL connections; the mail is plain text with the
-  reminder title as subject. `nodemailer` is imported lazily; a missing install
-  degrades to a debug log.
+  reminder title as subject. If From is empty or not an address, the SMTP
+  username is used. `nodemailer` is imported lazily; a missing install degrades
+  to a debug log.
 - **No local network dependency, no shortcut registration.** The toast helper
   process is capped at 15 s and lingers 2 s after `Show()`. Email uses outbound
   SMTP with connection/greeting/socket timeouts. Failures only reach
@@ -258,7 +271,7 @@ native Settings page. It is the only UI the bundle owns.
 | `smtpSecure` | boolean | `false` | Implicit TLS (465); false uses STARTTLS |
 | `smtpUser` | string | `""` | SMTP login; empty means no auth |
 | `smtpPass` | string, `role: "secret"` | absent | SMTP password/authorization code; write-only over remote reads |
-| `emailFrom` | string | `""` | Sender address |
+| `emailFrom` | string | `""` | Sender address; empty or non-address falls back to `smtpUser` |
 | `emailTo` | string | `""` | Comma-separated recipients |
 
 How it is wired:
@@ -285,6 +298,16 @@ How it is wired:
   removed from `value` and reported as `secrets: [{ path: ["smtpPass"], set }]`.
   The client uses that marker only to render "configured" and to include a
   replacement password when the user types one.
+- **The test button is a loopback HTTP call, not a settings write.** The client
+  POSTs `/dsh-thinking-depth/test-email` with `content-type: application/json`
+  and `x-dsh-test-email: 1`. `test-email.js` registers that exact route through
+  `ctx.inject(["webServer"], ...)`, requires a loopback peer, and returns
+  `{ ok, message | error }`. It reads the saved settings only; it never writes
+  them. The 1 s/settings-write design was removed because a settings mutation
+  runs inside an HMR transaction and a nested result write is rejected.
+- **The client falls back to the SMTP username for From.** The hint and the
+  computed "configured" state use the same rule as `emailFromAddress()`, so a
+  nickname in From does not show a false incompleteness warning.
 - **Live reads.** The sweep calls `readSettingsFrom(ctx.settings.describe())`
   after the Loader settles and on every sweep; the notifier calls
   `readSettings(ctx)` at each event and on each pending completion timer.
@@ -342,7 +365,7 @@ Run these in order; each catches a different class of mistake.
 ### 1. Offline behaviour (always)
 
 ```powershell
-pnpm verify        # verify-host, verify-notify, verify-settings, verify-email, verify-delivery, verify-client
+pnpm verify        # verify-host, verify-notify, verify-settings, verify-email, verify-delivery, verify-test-email, verify-client
 ```
 
 `tools/verify-host.mjs` drives `planSweep()` with a descriptor shaped like
@@ -354,9 +377,11 @@ the validator, the secret field and the namespace-reader defaults.
 `tools/verify-email.mjs` checks recipient parsing, SMTP completeness, mail text
 and the exact nodemailer options through a fake transport.
 `tools/verify-delivery.mjs` checks local/email channel selection and failure
-isolation. `tools/verify-client.mjs` executes the real `client/client.js`
+isolation. `tools/verify-test-email.mjs` drives the loopback route with fake
+request/response objects, including method, loopback, header and content-type
+guards. `tools/verify-client.mjs` executes the real `client/client.js`
 through a fake module loader and a minimal React shim, then renders the
-registered section in its ready/loading/read-only states. Extend all six
+registered section in its ready/loading/read-only states. Extend all seven
 whenever a rule changes.
 
 ### 1b. Real transports (manual, before shipping)
@@ -373,9 +398,10 @@ helper itself logs scripting failures at debug level. Do not run it in a loop �
 each call raises a visible notification.
 
 Email is intentionally not smoke-tested by an automated helper: it needs a real
-mailbox and would send a real message. Verify the SMTP form in the Settings
-page, then use the desktop profile to confirm one real reminder arrives. The
-sender itself is covered by `verify-email.mjs` with an injected transport.
+mailbox and would send a real message. Use **Settings → Thinking & Notifications
+→ Send test email** (or POST the loopback route described below) to see the
+exact SMTP result; the sender itself is covered by `verify-email.mjs` with an
+injected transport.
 
 ### 2. End-to-end in an isolated profile (always, before shipping)
 
@@ -409,6 +435,20 @@ throwing. A missing packaged file or a listener registration error would make th
 boot fail or log a plugin error. A **live** reminder needs a real agent turn and
 is therefore verified in the desktop profile by the user; the offline harness
 covers the event logic and `tools/notify-smoke.mjs` covers the transport.
+
+To check the test-send route, boot a scratch profile whose `dsh-thinking-depth`
+config sets `email: true`, a deliberately unreachable `smtpHost`/`smtpPort`
+(for example `127.0.0.1:1`), a valid From/To, then call:
+
+```powershell
+Invoke-WebRequest -Method Post -ContentType application/json `
+  -Headers @{ 'x-dsh-test-email' = '1' } -Body '{}' `
+  http://127.0.0.1:<web-port>/dsh-thinking-depth/test-email
+```
+
+Expect `200` with `{ "ok": false, "error": "connect ECONNREFUSED ..." }`.
+Without the header, expect `403`. This is the only runnable proof of the route
+guards and response; it does not send real mail.
 
 The boot also verifies the Settings namespace and the secret boundary. Install a
 temporary probe plugin that injects `settings`, logs
@@ -451,7 +491,9 @@ do not fake one by writing events into a session log.
 
 Real email delivery is not verified here: it needs a live mailbox and would send
 an actual message. The SMTP options and mail fields are covered with an injected
-transport; the user must confirm one real arrival from the desktop profile.
+transport; the loopback test route was exercised end-to-end against
+`127.0.0.1:1` and returned the expected `ECONNREFUSED` error, but the user must
+confirm one real arrival from the desktop profile.
 
 ## Traps
 
@@ -552,6 +594,24 @@ transport; the user must confirm one real arrival from the desktop profile.
 - **To/From are plain addr-spec strings.** The transport does not accept display
   names (`Name <addr>`); multiple recipients are comma/semicolon separated.
   Keep the docs and the client hint in sync if that changes.
+- **The test route is optional and loopback-only.** It is registered only when
+  `webServer` is present (`ctx.inject(["webServer"], ...)`), and it rejects
+  non-loopback peers, non-POST requests, missing `x-dsh-test-email: 1`, and
+  non-JSON bodies. Keep all four guards. Do not replace the route with a
+  settings-field request/result handshake: settings writes run inside an HMR
+  transaction, so a result written from the event is rejected ("HMR transactions
+  cannot be nested") and the button appears to hang.
+- **The test route reads saved settings only.** The client saves the form before
+  calling it, and the route never mutates the Config. It must not expose the
+  password: it reports only success or the SMTP error.
+- **The test route is a Web-GUI feature.** It needs the host `webServer`; an
+  Electron `file://` shell or a TUI without the web server will get a 404, and
+  the button shows the generic test failure. Do not claim it works in every
+  client.
+- **From falls back to `smtpUser`.** `emailFromAddress()` treats a nickname or an
+  empty From as "use the username"; `emailConfigurationProblems()` and the
+  client's "configured" check must use the same rule, or a valid config shows a
+  false incompleteness warning.
 - **Windows console encoding.** Chinese output in this repository is UTF-8;
   read and write files as UTF-8.
 

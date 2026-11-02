@@ -15,7 +15,7 @@ DSH 思考深度与消息推送是一个包含两个功能、一个小设置页�
 | 功能 | 做什么 | 设置 |
 |---|---|---|
 | **推理档位** | 为缺少档位的手写 `llm-pi-ai` 路由补上推理等级，让原生档位控件可用。 | 启用非官方模型的思考深度 |
-| **消息推送** | 任务结束、模型提问或等待审批时发出提醒。 | 本地通知、邮箱推送，以及邮箱 SMTP 配置 |
+| **消息推送** | 任务结束、模型提问或等待审批时发出提醒。 | 本地通知、邮箱推送，以及邮箱 SMTP 配置和「测试发送」按钮 |
 
 包名和设置命名空间为了兼容仍然叫 `dsh-thinking-depth`；显示名称和设置节覆盖两个功能。
 
@@ -42,8 +42,12 @@ DSH 思考深度与消息推送是一个包含两个功能、一个小设置页�
 | SSL/TLS | 465 端口使用隐式 TLS 时打开；587 通常关闭并使用 STARTTLS。 |
 | 用户名 | SMTP 登录名；不需要认证的中继可留空。 |
 | 密码 | 邮箱授权码或应用专用密码。界面上只写不读，保存后不会回显。 |
-| 发件人 | 发件地址。 |
+| 发件人 | 发件地址。留空或只写昵称时，自动使用 SMTP 用户名。 |
 | 收件人 | 一个或多个地址，用逗号分隔。 |
+
+保存后可以直接点 **测试发送**：按钮会先保存当前表单，再用已保存的 SMTP 配置发一封测试
+邮件，并在按钮下方显示成功或具体的 SMTP 错误。测试接口只接受本机请求，并且要求页面
+携带测试请求头，其他来源无法触发。
 
 建议使用邮箱的授权码，而不是登录密码。密码通过远程设置接口读取时会被抹掉，但它仍然
 保存在本机 Profile 的配置补丁里；界面看不到，不代表磁盘上没有，请把 Profile 目录当作
@@ -155,7 +159,10 @@ const base = defaults.get(entry.id)        // 手写路由不在 catalog 里 →
   该渠道仅支持 Windows，其他平台会静默跳过。
 - **邮箱推送**通过 `nodemailer` 走 SMTP。邮件是纯文本，主题就是提醒标题，正文包含提醒
   内容、本地时间和插件名称。非 SSL 连接要求 STARTTLS；465 端口使用隐式 TLS。SMTP
-  密码只在 Host 侧读取，不会进入邮件正文，也不会写进日志。
+  密码只在 Host 侧读取，不会进入邮件正文，也不会写进日志。发件人留空或只写昵称时，
+  自动回退到 SMTP 用户名。
+- **测试发送**在设置页直接调用本机回环的测试接口，用当前已保存的 SMTP 配置发一封测试
+  邮件，并把成功或具体错误显示在按钮下方；不会改动任何设置。
 
 发送是「即发即忘」的，且各渠道互相隔离：缺少 `powershell.exe`、专注助手拦截、
 SMTP 服务器不可达、登录失败或 `nodemailer` 未安装，都只记 debug 日志，绝不影响正在
@@ -167,7 +174,7 @@ SMTP 服务器不可达、登录失败或 `nodemailer` 未安装，都只记 deb
 ```powershell
 # 在本目录打出压缩包，然后安装到当前 Profile
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.7.0.tgz"
 ```
 
 安装或替换后需要重启 DSH。推理扫描是宿主侧逻辑，但设置页是浏览器侧 bundle，重启后
@@ -193,7 +200,7 @@ dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
 
 ## 开发
 
-`pnpm verify` 会运行六个离线检查：
+`pnpm verify` 会运行七个离线检查：
 
 - `tools/verify-host.mjs`：直接导入 `index.js`，用与 `settings.describe()` 同形状的
   描述符驱动档位规划函数，断言将要写入的确切内容。
@@ -205,6 +212,8 @@ dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
   传给 nodemailer 的确切选项。
 - `tools/verify-delivery.mjs`：检查本地/邮箱渠道是否按设置即时选择，以及一个渠道失败时
   不影响另一个渠道。
+- `tools/verify-test-email.mjs`：用假的请求/响应对象驱动本机测试接口，覆盖方法、回环、
+  请求头和 content-type 校验。
 - `tools/verify-client.mjs`：通过假的客户端模块加载器和最小 React shim 执行真实的
   `client/client.js`，渲染设置节的就绪、加载中和只读状态。
 
@@ -232,7 +241,10 @@ node tools/notify-smoke.mjs "DSH 提醒测试" "「思考深度与消息推送�
 - **本地**提醒仅支持 Windows，而且有意做成「只看不动」：通知只说明发生了什么，不会
   激活或聚焦 DSH 窗口。Windows 的专注助手和系统通知设置可能拦截它。
 - **邮箱**提醒需要能访问外网 SMTP；邮件是纯文本，发送失败不会自动重试。收不到邮件时
-  先检查 SMTP 配置。建议使用授权码或应用专用密码，不要使用邮箱登录密码。
+  先点设置页的「测试发送」，它会显示具体的 SMTP 错误。建议使用授权码或应用专用密码，
+  不要使用邮箱登录密码。
+- 测试发送接口只接受本机回环请求，并要求页面携带测试请求头，其他来源或其他机器无法
+  触发；它只读取已保存的 SMTP 设置，不会修改配置。
 - SMTP 密码通过远程设置读取时会被抹掉，但它仍然保存在本机 Profile 配置补丁里。请把
   Profile 目录当作敏感数据。
 - 提醒只根据根会话自己的事件日志判断；子代理的完成已经体现在父会话的结果里，因此不会

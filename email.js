@@ -57,34 +57,48 @@ export function isEmailAddress(value) {
 }
 
 /**
+ * Resolve the sender address. A non-address value in `emailFrom` is treated as
+ * a display name the user typed by mistake and falls back to the SMTP
+ * username when that is a valid address.
+ * @param settings - resolved plugin settings.
+ * @returns a plain sender address, or "" when neither field is usable.
+ */
+export function emailFromAddress(settings) {
+	const configured = String(settings?.emailFrom ?? "").trim();
+	if (isEmailAddress(configured)) return configured;
+	const user = String(settings?.smtpUser ?? "").trim();
+	return isEmailAddress(user) ? user : "";
+}
+
+/**
+ * List the missing or invalid SMTP fields, in user-facing terms.
+ * @param settings - resolved plugin settings.
+ * @returns an empty list when the channel can attempt a send.
+ */
+export function emailConfigurationProblems(settings) {
+	if (typeof settings !== "object" || settings === null) return ["SMTP 设置"];
+	const problems = [];
+	if (String(settings.smtpHost ?? "").trim() === "") problems.push("SMTP 服务器");
+	const port = settings.smtpPort;
+	if (!Number.isInteger(port) || port < 1 || port > 65535) problems.push("端口");
+	if (emailFromAddress(settings) === "") problems.push("发件人地址（留空时使用用户名）");
+	const recipients = parseRecipients(settings.emailTo);
+	if (recipients.length === 0 || !recipients.every(isEmailAddress)) problems.push("收件人地址");
+	const user = String(settings.smtpUser ?? "").trim();
+	const pass = settings.smtpPass;
+	if (user !== "" && (typeof pass !== "string" || pass === "")) problems.push("SMTP 密码");
+	if (user === "" && typeof pass === "string" && pass !== "") problems.push("SMTP 用户名");
+	return problems;
+}
+
+/**
  * Whether the email channel has enough information to attempt a send.
  * `email` itself is checked separately; this only validates SMTP details.
  * @param settings - resolved plugin settings.
  * @returns whether host, port, sender, recipients and auth are complete.
  */
 export function isEmailConfigured(settings) {
-	if (typeof settings !== "object" || settings === null) return false;
-	const host = String(settings.smtpHost ?? "").trim();
-	const from = String(settings.emailFrom ?? "").trim();
-	const recipients = parseRecipients(settings.emailTo);
-	const port = settings.smtpPort;
-	const user = String(settings.smtpUser ?? "").trim();
-	const pass = settings.smtpPass;
-	const authComplete =
-		user === ""
-			? pass === undefined
-			: typeof pass === "string" && pass !== "";
-	return (
-		host !== "" &&
-		from !== "" &&
-		recipients.length > 0 &&
-		Number.isInteger(port) &&
-		port >= 1 &&
-		port <= 65535 &&
-		authComplete &&
-		recipients.every(isEmailAddress) &&
-		isEmailAddress(from)
-	);
+	return emailConfigurationProblems(settings).length === 0;
 }
 
 /**
@@ -96,7 +110,7 @@ export function isEmailConfigured(settings) {
  */
 export function buildEmail(notification, settings, now = Date.now()) {
 	if (!isEmailConfigured(settings)) return null;
-	const from = settings.emailFrom.trim();
+	const from = emailFromAddress(settings);
 	const recipients = parseRecipients(settings.emailTo);
 	const timestamp = Number.isFinite(notification?.ts) ? notification.ts : now;
 	const body = String(notification?.body ?? "").trim();
@@ -115,25 +129,36 @@ export function buildEmail(notification, settings, now = Date.now()) {
 	};
 }
 
+/** @param error - unknown thrown value. @returns a short single-line cause. */
+function describeError(error) {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
 /**
- * Send one reminder through SMTP.
+ * Send one reminder through SMTP and report the exact outcome.
+ *
+ * This is the test-button path: it returns the failure reason so the Settings
+ * page can show it. The reminder path uses {@link sendEmail}, which discards
+ * the detail and only logs at debug level.
+ *
  * @param notification - accepted reminder payload.
  * @param settings - resolved plugin settings, including `smtpPass`.
  * @param options - test/implementation seams.
  * @param options.logger - debug logger.
  * @param options.createTransport - injected transport factory for tests.
  * @param options.now - clock used in the mail body.
- * @returns whether the mail was accepted by the transport.
+ * @returns `{ ok: true }` or `{ ok: false, error }`.
  */
-export async function sendEmail(notification, settings, options = {}) {
+export async function sendEmailDetailed(notification, settings, options = {}) {
 	const logger = options.logger;
-	if (settings?.email !== true) return false;
-	if (!isEmailConfigured(settings)) {
-		logger?.debug?.("thinking-depth: email channel is enabled but SMTP settings are incomplete");
-		return false;
+	if (settings?.email !== true) return { ok: false, error: "邮箱推送未启用" };
+	const problems = emailConfigurationProblems(settings);
+	if (problems.length > 0) {
+		return { ok: false, error: `SMTP 设置不完整：${problems.join("、")}` };
 	}
 	const message = buildEmail(notification, settings, options.now ?? Date.now());
-	if (message === null) return false;
+	if (message === null) return { ok: false, error: "邮件内容无法构建" };
 
 	let transporter;
 	try {
@@ -142,12 +167,11 @@ export async function sendEmail(notification, settings, options = {}) {
 				? options.createTransport
 				: (await loadNodemailer()).createTransport;
 		if (typeof createTransport !== "function") {
-			logger?.debug?.("thinking-depth: nodemailer did not expose createTransport");
-			return false;
+			return { ok: false, error: "nodemailer 未提供 createTransport" };
 		}
-		const user = settings.smtpUser.trim();
+		const user = String(settings.smtpUser ?? "").trim();
 		const optionsForTransport = {
-			host: settings.smtpHost.trim(),
+			host: String(settings.smtpHost ?? "").trim(),
 			port: settings.smtpPort,
 			secure: settings.smtpSecure === true,
 			requireTLS: settings.smtpSecure !== true,
@@ -160,14 +184,12 @@ export async function sendEmail(notification, settings, options = {}) {
 		};
 		transporter = createTransport(optionsForTransport);
 		await transporter.sendMail(message);
-		logger?.debug?.("thinking-depth: email reminder sent to %s", message.to);
-		return true;
+		logger?.debug?.("thinking-depth: email sent to %s", message.to);
+		return { ok: true };
 	} catch (error) {
-		logger?.debug?.(
-			"thinking-depth: email reminder failed: %s",
-			error instanceof Error ? error.message : String(error),
-		);
-		return false;
+		const detail = describeError(error);
+		logger?.debug?.("thinking-depth: email failed: %s", detail);
+		return { ok: false, error: detail };
 	} finally {
 		try {
 			transporter?.close?.();
@@ -175,4 +197,15 @@ export async function sendEmail(notification, settings, options = {}) {
 			/* closing a failed transport is best-effort */
 		}
 	}
+}
+
+/**
+ * Send one reminder, discarding the failure detail for the notification path.
+ * @param notification - accepted reminder payload.
+ * @param settings - resolved plugin settings.
+ * @param options - test/implementation seams.
+ * @returns whether the mail was accepted by the transport.
+ */
+export async function sendEmail(notification, settings, options = {}) {
+	return (await sendEmailDetailed(notification, settings, options)).ok;
 }

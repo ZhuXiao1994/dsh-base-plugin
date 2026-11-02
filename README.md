@@ -18,7 +18,7 @@ Models** page; the plugin does not add a model editor.
 | Feature | What it does | Settings |
 |---|---|---|
 | **Reasoning levels** | Fills the reasoning levels a hand-declared `llm-pi-ai` route is missing, so the native effort control works. | Enable thinking levels for third-party models |
-| **Reminders** | Raises a notification when a task finishes, asks a question, or waits for approval. | Local notifications and Email notifications, with SMTP details |
+| **Reminders** | Raises a notification when a task finishes, asks a question, or waits for approval. | Local notifications and Email notifications, with SMTP details and a **Send test email** action |
 
 The internal package name and settings namespace remain `dsh-thinking-depth` for
 compatibility; the display name and Settings section cover both features.
@@ -49,8 +49,14 @@ When **Email notifications** is on, the SMTP form has these fields:
 | SSL/TLS | Turn on for implicit TLS (port 465). Leave off for STARTTLS (port 587). |
 | Username | SMTP login name. Leave user and password empty for a relay without authentication. |
 | Password | App password or authorization code. It is write-only in the UI: it is never sent back to the browser after saving. |
-| From | Sender address. |
+| From | Sender address. Leave blank (or enter only a nickname) to fall back to the SMTP username. |
 | To | One or more recipients, comma-separated. |
+
+After saving, use **Send test email** to try the configuration immediately. The
+button saves any unsaved fields first, sends one test message, and shows the
+exact success or SMTP error below the actions. The test endpoint accepts
+loopback requests only and requires the page's test header, so it cannot be
+triggered by another origin.
 
 Use an app-specific password rather than your normal mailbox password. The
 password is a write-only settings field over the remote API, but it is still
@@ -187,7 +193,8 @@ Each accepted reminder is dispatched to every enabled channel independently:
   text mail with the reminder title as the subject, the reminder body, the local
   time, and the plugin name. STARTTLS is required for non-SSL connections;
   port 465 uses implicit TLS. The SMTP password is read only on the Host and is
-  never included in the mail or a log line.
+  never included in the mail or a log line. If **From** is empty or is not an
+  address (a nickname), the plugin uses the SMTP username as the sender.
 
 Delivery is fire-and-forget and isolated per channel: a missing
 `powershell.exe`, Focus Assist, an unreachable SMTP server, a refused login, or
@@ -200,7 +207,7 @@ mailbox, use **Settings → Thinking & Notifications**.
 ```powershell
 # Build the tarball from this directory, then install it into the profile.
 pnpm pack --pack-destination artifacts
-dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.5.1.tgz"
+dsh plugin --profile desktop add "$PWD\artifacts\dsh-thinking-depth-0.7.0.tgz"
 ```
 
 Restart DSH after installing or replacing the package. The reasoning sweep is
@@ -230,7 +237,7 @@ profile patch. They do not touch any provider configuration.
 
 ## Development
 
-Six offline harnesses run under `pnpm verify`:
+Seven offline harnesses run under `pnpm verify`:
 
 - `tools/verify-host.mjs` imports `index.js` and drives the level-planning
   functions against a descriptor shaped like `settings.describe()`.
@@ -243,6 +250,9 @@ Six offline harnesses run under `pnpm verify`:
   transport.
 - `tools/verify-delivery.mjs` checks that local and email channels are selected
   live and that one failing channel never suppresses the other.
+- `tools/verify-test-email.mjs` drives the loopback test route with fake
+  request/response objects, including its method, loopback, header and
+  content-type guards.
 - `tools/verify-client.mjs` executes the real `client/client.js` through a fake
   client module loader and a minimal React shim, then renders the Settings
   section in its ready, loading and read-only states.
@@ -278,7 +288,10 @@ errors, not the final CSS or the real browser module table.
 - **Email** reminders need outbound SMTP access. They are plain-text mail and
   are not retried after a failure; check the SMTP settings if mail stops
   arriving. Use an app password or authorization code, not your normal account
-  password.
+  password. **Send test email** is the quickest way to see the exact SMTP error.
+- The test-send endpoint is loopback-only and requires the page's request header;
+  it is not reachable from another origin or another machine. It uses the saved
+  SMTP settings and does not alter them.
 - The SMTP password is redacted from remote settings reads, but it is still
   stored in the local profile configuration patch. Treat the profile directory
   as sensitive.

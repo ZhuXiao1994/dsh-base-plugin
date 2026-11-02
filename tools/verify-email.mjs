@@ -8,11 +8,14 @@
 import assert from "node:assert/strict";
 import {
 	buildEmail,
+	emailConfigurationProblems,
+	emailFromAddress,
 	formatDateTime,
 	isEmailAddress,
 	isEmailConfigured,
 	parseRecipients,
 	sendEmail,
+	sendEmailDetailed,
 } from "../email.js";
 
 const BASE = {
@@ -46,16 +49,26 @@ const NOTIFICATION = {
 	assert.equal(isEmailAddress(undefined), false);
 }
 
-// 2. Configuration completeness, including the auth pair.
+// 2. Configuration completeness, including the auth pair and sender fallback.
 {
 	assert.equal(isEmailConfigured(BASE), true);
 	assert.equal(isEmailConfigured({ ...BASE, smtpUser: "", smtpPass: undefined }), true);
 	assert.equal(isEmailConfigured({ ...BASE, smtpUser: "u", smtpPass: undefined }), false);
 	assert.equal(isEmailConfigured({ ...BASE, smtpHost: "" }), false);
-	assert.equal(isEmailConfigured({ ...BASE, emailFrom: "not-an-address" }), false);
+	assert.equal(isEmailConfigured({ ...BASE, emailFrom: "秋风萧瑟" }), true, "falls back to the username");
+	assert.equal(
+		isEmailConfigured({ ...BASE, emailFrom: "秋风萧瑟", smtpUser: "", smtpPass: undefined }),
+		false,
+		"an invalid From with no usable username is incomplete",
+	);
 	assert.equal(isEmailConfigured({ ...BASE, emailTo: "not-an-address" }), false);
 	assert.equal(isEmailConfigured({ ...BASE, smtpPort: 0 }), false);
 	assert.equal(isEmailConfigured({ ...BASE, smtpPort: 70_000 }), false);
+	assert.equal(emailFromAddress(BASE), "from@example.com");
+	assert.equal(emailFromAddress({ ...BASE, emailFrom: "" }), "user@example.com");
+	assert.equal(emailFromAddress({ ...BASE, emailFrom: "nickname" }), "user@example.com");
+	assert.equal(emailFromAddress({ ...BASE, emailFrom: "", smtpUser: "" }), "");
+	assert.deepEqual(emailConfigurationProblems({ ...BASE, smtpHost: "" }), ["SMTP 服务器"]);
 }
 
 // 3. The mail fields carry the reminder and never the SMTP password.
@@ -68,6 +81,10 @@ const NOTIFICATION = {
 	assert.match(mail.text, /时间：/u);
 	assert.match(mail.text, /来源：DSH Thinking Depth & Notifications/u);
 	assert.equal(mail.text.includes("app-password"), false);
+	assert.equal(
+		buildEmail(NOTIFICATION, { ...BASE, emailFrom: "秋风萧瑟" }).from,
+		"user@example.com",
+	);
 	assert.equal(formatDateTime(Date.UTC(2026, 10, 2, 2, 46, 39)).length > 0, true);
 }
 
@@ -150,7 +167,31 @@ const NOTIFICATION = {
 		}),
 		false,
 	);
-	assert.ok(logs.some((entry) => String(entry[0]).includes("email reminder failed")));
+	assert.ok(logs.some((entry) => String(entry[0]).includes("email failed")));
+}
+
+// 8. The detailed sender reports the exact reason for the test button.
+{
+	const sent = await sendEmailDetailed(NOTIFICATION, BASE, {
+		createTransport: () => ({ async sendMail() {}, close() {} }),
+	});
+	assert.deepEqual(sent, { ok: true });
+	const disabled = await sendEmailDetailed(NOTIFICATION, { ...BASE, email: false });
+	assert.equal(disabled.ok, false);
+	assert.match(disabled.error, /未启用/u);
+	const incomplete = await sendEmailDetailed(NOTIFICATION, { ...BASE, smtpHost: "" });
+	assert.equal(incomplete.ok, false);
+	assert.match(incomplete.error, /SMTP 设置不完整/u);
+	const failed = await sendEmailDetailed(NOTIFICATION, BASE, {
+		createTransport: () => ({
+			async sendMail() {
+				throw new Error("535 Authentication failed");
+			},
+			close() {},
+		}),
+	});
+	assert.equal(failed.ok, false);
+	assert.match(failed.error, /Authentication failed/u);
 }
 
 console.log("email channel: all behaviour checks passed");

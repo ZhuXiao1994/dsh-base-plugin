@@ -224,6 +224,8 @@ function collect(node, predicate, out = []) {
 	assert.ok(inputs.length >= 6, "SMTP fields are rendered");
 	const buttons = collect(tree, (node) => node.type === "button");
 	assert.ok(buttons.some((node) => textOf(node).includes("保存邮箱设置")));
+	assert.ok(buttons.some((node) => textOf(node).includes("测试发送")));
+	assert.match(text, /点击测试时会先保存当前表单/u);
 }
 
 // 2. Loading, read-only and unavailable states are explained and disabled.

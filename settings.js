@@ -111,7 +111,7 @@ const FIELDS = {
 	smtpSecure: booleanField("端口 465 的 SSL/TLS 直连；587 通常关闭并使用 STARTTLS。", false),
 	smtpUser: stringField("SMTP 登录用户名；不需要认证的服务器可留空。"),
 	smtpPass: secretField("SMTP 密码或授权码；只写不读，留空表示保持原值。"),
-	emailFrom: stringField("发件人地址。"),
+	emailFrom: stringField("发件人地址；留空或只写昵称时使用 SMTP 用户名。"),
 	emailTo: stringField("收件人地址；多个地址用逗号分隔。"),
 };
 

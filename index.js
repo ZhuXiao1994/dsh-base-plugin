@@ -32,6 +32,7 @@
 import { Config, readSettings, readSettingsFrom } from "./settings.js";
 import { installAttention } from "./notify.js";
 import { createDelivery } from "./delivery.js";
+import { installTestEmail } from "./test-email.js";
 
 export { Config };
 
@@ -296,6 +297,17 @@ export function apply(ctx, config = {}) {
 	} catch (error) {
 		ctx.logger?.warn?.(
 			"thinking-depth: reminders could not start: %s",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+
+	// The Settings test button is useful precisely when delivery is broken, so
+	// it gets its own guard rather than sharing the notifier's.
+	try {
+		installTestEmail(ctx);
+	} catch (error) {
+		ctx.logger?.warn?.(
+			"thinking-depth: test email could not start: %s",
 			error instanceof Error ? error.message : String(error),
 		);
 	}

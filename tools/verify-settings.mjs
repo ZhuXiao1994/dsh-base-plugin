@@ -3,8 +3,8 @@
  *
  * The Settings service rehydrates this schema with schemastery on the Host and
  * in the browser. That rehydration is exercised by the app itself; this file
- * checks the contract the service projects (one object with three booleans,
- * three strings, one number and one write-only secret), the Cordis validator,
+ * checks the contract the service projects (one object with four booleans,
+ * four strings, one number and one write-only secret), the Cordis validator,
  * and the defaults used by the host halves.
  */
 import assert from "node:assert/strict";

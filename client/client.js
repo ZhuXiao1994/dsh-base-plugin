@@ -50,7 +50,8 @@ window.__ModuleLoader__.load({
 			smtpPass: "Password",
 			smtpPassConfigured: "A password is configured. Leave blank to keep it.",
 			smtpPassUnset: "No password configured.",
-			emailFrom: "From",
+			emailFrom: "From address",
+			emailFromHint: "Leave blank to use the SMTP username; a display name alone is not an address.",
 			emailTo: "To",
 			emailToHint: "Separate multiple addresses with commas.",
 			emailIncomplete:
@@ -59,6 +60,13 @@ window.__ModuleLoader__.load({
 			saving: "Saving…",
 			saved: "Saved.",
 			clearPassword: "Clear password",
+			testEmail: "Send test email",
+			testing: "Sending…",
+			testFailed: "The test request could not be sent. Try again.",
+			testSuccess: "Test email sent.",
+			testTimeout: "Timed out waiting for the test result. Check the app log.",
+			testEmailHint:
+				"The test saves the current form first, then sends one email with the saved SMTP settings.",
 			invalidPort: "Port must be an integer between 1 and 65535.",
 			loading: "Reading settings…",
 			readOnly: "Settings are read-only in this deployment.",
@@ -87,7 +95,8 @@ window.__ModuleLoader__.load({
 			smtpPass: "密码 / 授权码",
 			smtpPassConfigured: "已保存密码；留空表示保持不变。",
 			smtpPassUnset: "尚未保存密码。",
-			emailFrom: "发件人",
+			emailFrom: "发件人地址",
+			emailFromHint: "留空时使用 SMTP 用户名；只写昵称不会发信。",
 			emailTo: "收件人",
 			emailToHint: "多个地址用逗号分隔。",
 			emailIncomplete: "邮箱推送已开启，但 SMTP 信息不完整，暂时不会发信。",
@@ -95,6 +104,12 @@ window.__ModuleLoader__.load({
 			saving: "保存中…",
 			saved: "已保存。",
 			clearPassword: "清除密码",
+			testEmail: "测试发送",
+			testing: "发送中…",
+			testFailed: "测试请求没有发出去，请重试。",
+			testSuccess: "测试邮件已发送。",
+			testTimeout: "等待测试结果超时，请检查应用日志。",
+			testEmailHint: "点击测试时会先保存当前表单，再用已保存的 SMTP 设置发送一封测试邮件。",
 			invalidPort: "端口必须是 1–65535 之间的整数。",
 			loading: "正在读取设置…",
 			readOnly: "当前部署的设置为只读。",
@@ -225,6 +240,9 @@ window.__ModuleLoader__.load({
 			const [fieldError, setFieldError] = React.useState("");
 			const [dirty, setDirty] = React.useState(false);
 			const [draft, setDraft] = React.useState({});
+			const [testing, setTesting] = React.useState(false);
+			const [testMessage, setTestMessage] = React.useState("");
+			const [testOk, setTestOk] = React.useState(false);
 
 			const ready = snapshot.status === "ready";
 			const disabled = !ready || snapshot.writable === false;
@@ -262,6 +280,16 @@ window.__ModuleLoader__.load({
 				});
 			}, [ready, dirty, snapshot.revision]);
 
+			React.useEffect(() => {
+				if (!testing) return;
+				const timer = setTimeout(() => {
+					setTesting(false);
+					setTestOk(false);
+					setTestMessage(t("testTimeout"));
+				}, 45_000);
+				return () => clearTimeout(timer);
+			}, [testing, t]);
+
 			const edit = (key, next) => {
 				setSaved(false);
 				setFieldError("");
@@ -281,11 +309,11 @@ window.__ModuleLoader__.load({
 			};
 
 			const saveEmail = async () => {
-				if (disabled || saving) return;
+				if (disabled || saving) return false;
 				const port = Number.parseInt(String(draft.smtpPort ?? ""), 10);
 				if (!Number.isInteger(port) || port < 1 || port > 65535) {
 					setFieldError(t("invalidPort"));
-					return;
+					return false;
 				}
 				const next = {
 					smtpHost: String(draft.smtpHost ?? "").trim(),
@@ -305,7 +333,7 @@ window.__ModuleLoader__.load({
 				if (ops.length === 0) {
 					setSaved(true);
 					setDirty(false);
-					return;
+					return true;
 				}
 				setSaving(true);
 				setSaveFailed(false);
@@ -314,14 +342,16 @@ window.__ModuleLoader__.load({
 					const accepted = await form.mutate(ops);
 					if (!accepted) {
 						setSaveFailed(true);
-						return;
+						return false;
 					}
 					setSaved(true);
 					setDirty(false);
 					setDraft((previous) => ({ ...previous, smtpPass: "" }));
 					await refreshSecret();
+					return true;
 				} catch {
 					setSaveFailed(true);
+					return false;
 				} finally {
 					setSaving(false);
 				}
@@ -347,12 +377,55 @@ window.__ModuleLoader__.load({
 				}
 			};
 
+			const testEmail = async () => {
+				if (disabled || saving || testing) return;
+				if (dirty) {
+					const saved = await saveEmail();
+					if (!saved) return;
+				}
+				setTesting(true);
+				setTestOk(false);
+				setTestMessage("");
+				try {
+					const response = await fetch("/dsh-thinking-depth/test-email", {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							"x-dsh-test-email": "1",
+						},
+						body: "{}",
+					});
+					const payload = await response.json().catch(() => ({}));
+					if (!response.ok || payload?.ok !== true) {
+						setTestOk(false);
+						setTestMessage(String(payload?.error ?? t("testFailed")));
+					} else {
+						setTestOk(true);
+						setTestMessage(String(payload?.message ?? t("testSuccess")));
+					}
+				} catch {
+					setTestOk(false);
+					setTestMessage(t("testFailed"));
+				} finally {
+					setTesting(false);
+				}
+			};
+
+			const addressLike = (candidate) =>
+				/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(String(candidate ?? "").trim());
 			const savedUser = String(value.smtpUser ?? "").trim();
+			const savedFrom = String(value.emailFrom ?? "").trim();
+			const sender = addressLike(savedFrom) ? savedFrom : addressLike(savedUser) ? savedUser : "";
+			const recipients = String(value.emailTo ?? "")
+				.split(/[,;]/u)
+				.map((entry) => entry.trim())
+				.filter((entry) => entry !== "");
 			const authComplete = savedUser === "" ? !secretSet : secretSet;
 			const emailConfigured =
 				String(value.smtpHost ?? "").trim() !== "" &&
-				String(value.emailFrom ?? "").trim() !== "" &&
-				String(value.emailTo ?? "").trim() !== "" &&
+				sender !== "" &&
+				recipients.length > 0 &&
+				recipients.every(addressLike) &&
 				Number.isInteger(value.smtpPort) &&
 				value.smtpPort >= 1 &&
 				value.smtpPort <= 65535 &&
@@ -462,6 +535,7 @@ window.__ModuleLoader__.load({
 								h(Field, {
 									label: t("emailFrom"),
 									value: draft.emailFrom,
+									hint: t("emailFromHint"),
 									disabled: disabled || saving,
 									onChange: (next) => edit("emailFrom", next),
 								}),
@@ -486,13 +560,23 @@ window.__ModuleLoader__.load({
 									},
 									saving ? t("saving") : t("save"),
 								),
+								h(
+									"button",
+									{
+										type: "button",
+										className: "dsh-thinking-depth-button",
+										disabled: disabled || saving || testing,
+										onClick: () => void testEmail(),
+									},
+									testing ? t("testing") : t("testEmail"),
+								),
 								secretSet
 									? h(
 											"button",
 											{
 												type: "button",
 												className: "dsh-thinking-depth-linkButton",
-												disabled: disabled || saving,
+												disabled: disabled || saving || testing,
 												onClick: () => void clearPassword(),
 											},
 											t("clearPassword"),
@@ -500,7 +584,20 @@ window.__ModuleLoader__.load({
 									: null,
 								saved ? h("span", { className: "dsh-thinking-depth-success" }, t("saved")) : null,
 							),
+							h("p", { className: "dsh-thinking-depth-hint" }, t("testEmailHint")),
 							fieldError ? h("p", { className: "dsh-thinking-depth-error" }, fieldError) : null,
+							testMessage
+								? h(
+										"p",
+										{
+											className: testOk
+												? "dsh-thinking-depth-success"
+												: "dsh-thinking-depth-error",
+											role: testOk ? "status" : "alert",
+										},
+										testMessage,
+									)
+								: null,
 						)
 					: null,
 				emailEnabled && !dirty && !emailConfigured
