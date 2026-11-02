@@ -15,13 +15,14 @@ section:
 2. It raises reminders when a task ends or the agent needs a human decision,
    through local Windows toasts and/or SMTP email. See [Reminders](#reminders).
 3. It contributes a **Thinking Depth & Notifications** section to the native
-   Settings page with delivery switches and the SMTP form. See [Settings](#settings).
+   Settings page with delivery switches, the SMTP form and a test-send action.
+   See [Settings](#settings).
 
 The reasoning feature's editing surface is still the native **Settings →
 Models** page; the plugin does not add its own model editor. The section above
 was requested by the user on 2026-10-25 and supersedes the earlier "no settings
-page" decision — do not grow it beyond the feature switches and the email
-configuration it needs.
+page" decision — do not grow it beyond the feature switches, the email
+configuration and its test action.
 
 - Package: `dsh-thinking-depth` (currently `0.7.0`); the display name is
   **Thinking Depth & Notifications**, and the internal id stays for compatibility
@@ -62,9 +63,10 @@ the host `settings` service. That is the only viable path; see
    ops. The rule tables use canonical keys (`off` included) precisely so that
    what the plugin writes never looks "missing" to itself.
 3. **The browser half is a thin settings surface.** It renders the feature
-   switches and the SMTP form. It reads and writes the plugin Config through
-   `ctx.configForms`; it must not call host APIs directly, duplicate business
-   logic, or grow additional sections. The host remains authoritative.
+   switches, the SMTP form and the test button. It reads and writes the plugin
+   Config through `ctx.configForms`; it must not call host APIs directly,
+   duplicate business logic, or grow additional sections. The one exception is
+   the explicit loopback test fetch; the host remains authoritative.
 4. **No DSH/pi-ai imports in host code.** They are not resolvable from a
    profile-installed package. The browser half may only require the client
    module table's `react` and `@deepseek-ai/dsh-client-ui-primitives`; it must
@@ -303,8 +305,8 @@ How it is wired:
   and `x-dsh-test-email: 1`. `test-email.js` registers that exact route through
   `ctx.inject(["webServer"], ...)`, requires a loopback peer, and returns
   `{ ok, message | error }`. It reads the saved settings only; it never writes
-  them. The 1 s/settings-write design was removed because a settings mutation
-  runs inside an HMR transaction and a nested result write is rejected.
+  them. An earlier settings-field handshake was removed because a settings
+  mutation runs inside an HMR transaction and a nested result write is rejected.
 - **The client falls back to the SMTP username for From.** The hint and the
   computed "configured" state use the same rule as `emailFromAddress()`, so a
   nickname in From does not show a false incompleteness warning.

@@ -58,6 +58,21 @@ exact success or SMTP error below the actions. The test endpoint accepts
 loopback requests only and requires the page's test header, so it cannot be
 triggered by another origin.
 
+### If only the local notification arrives
+
+1. Click **Send test email**. The result names the failing step instead of
+   failing silently.
+2. Keep **From** empty, or enter a real address. A nickname alone is accepted
+   now and falls back to the SMTP username, but using an address is clearer.
+3. Mail providers such as QQ, 163 and Gmail require an **authorization code or
+   app password**, not the normal login password. Use `465` with SSL/TLS on, or
+   `587` with it off (STARTTLS).
+4. Confirm the recipient is a plain address list, separated by commas.
+
+An earlier version silently skipped email when **From** was a nickname; that is
+the classic "local toast works, email does not" symptom. Keep the test button's
+message when reporting a remaining failure.
+
 Use an app-specific password rather than your normal mailbox password. The
 password is a write-only settings field over the remote API, but it is still
 stored in the local profile configuration patch; the UI cannot read it back, but
