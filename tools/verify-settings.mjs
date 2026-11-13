@@ -3,7 +3,7 @@
  *
  * The Settings service rehydrates this schema with schemastery on the Host and
  * in the browser. That rehydration is exercised by the app itself; this file
- * checks the contract the service projects (one object with four booleans,
+ * checks the contract the service projects (one object with five booleans,
  * four strings, one number and one write-only secret), the Cordis validator,
  * and the defaults used by the host halves.
  */
@@ -15,6 +15,8 @@ const KEYS = [
 	"thinkingDepth",
 	"notifications",
 	"email",
+	"enhancedMode",
+	"jailbreakGuard",
 	"smtpHost",
 	"smtpPort",
 	"smtpSecure",
@@ -33,6 +35,8 @@ const KEYS = [
 		thinkingDepth: "boolean",
 		notifications: "boolean",
 		email: "boolean",
+		enhancedMode: "boolean",
+		jailbreakGuard: "boolean",
 		smtpHost: "string",
 		smtpPort: "number",
 		smtpSecure: "boolean",
@@ -75,6 +79,8 @@ const KEYS = [
 		thinkingDepth: false,
 		notifications: false,
 		email: true,
+		enhancedMode: false,
+		jailbreakGuard: true,
 		smtpHost: "smtp.example.com",
 		smtpPort: 465,
 		smtpSecure: true,

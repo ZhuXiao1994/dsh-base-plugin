@@ -27,6 +27,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
 	thinkingDepth: true,
 	notifications: true,
 	email: false,
+	enhancedMode: false,
+	jailbreakGuard: true,
 	smtpHost: "",
 	smtpPort: 587,
 	smtpSecure: false,
@@ -106,6 +108,14 @@ const FIELDS = {
 	thinkingDepth: booleanField("自动为手写声明的第三方模型补写推理档位。"),
 	notifications: booleanField("在本机弹出 Windows 通知。"),
 	email: booleanField("通过 SMTP 把提醒发送到邮箱。", false),
+	enhancedMode: booleanField(
+		"把操作者人格与末尾锚点注入系统提示词（真实破甲）；关闭后立即从提示词中移除。",
+		false,
+	),
+	jailbreakGuard: booleanField(
+		"破甲运行时守卫：模型拒答时自动续命，异常收尾（报错 / 截断 / 中断）时自动续跑。",
+		true,
+	),
 	smtpHost: stringField("SMTP 服务器地址，例如 smtp.qq.com。"),
 	smtpPort: numberField("SMTP 端口；465 通常配 SSL，587 配 STARTTLS。", 587),
 	smtpSecure: booleanField("端口 465 的 SSL/TLS 直连；587 通常关闭并使用 STARTTLS。", false),
@@ -140,7 +150,14 @@ export const Config = {
 			if (typeof value !== "object" || Array.isArray(value)) {
 				return { issues: [{ message: "expected an object", path: [] }] };
 			}
-			const booleanKeys = ["thinkingDepth", "notifications", "email", "smtpSecure"];
+			const booleanKeys = [
+				"thinkingDepth",
+				"notifications",
+				"email",
+				"enhancedMode",
+				"jailbreakGuard",
+				"smtpSecure",
+			];
 			const stringKeys = ["smtpHost", "smtpUser", "emailFrom", "emailTo"];
 			const result = {};
 			const issues = [];
@@ -190,6 +207,8 @@ export function readSettingsFrom(rows) {
 		thinkingDepth: value.thinkingDepth !== false,
 		notifications: value.notifications !== false,
 		email: value.email === true,
+		enhancedMode: value.enhancedMode === true,
+		jailbreakGuard: value.jailbreakGuard !== false,
 		smtpHost: text("smtpHost"),
 		smtpPort: Number.isInteger(value.smtpPort) ? value.smtpPort : DEFAULT_SETTINGS.smtpPort,
 		smtpSecure: value.smtpSecure === true,

@@ -34,6 +34,14 @@ window.__ModuleLoader__.load({
 			thinkingDepth: "Enable thinking levels for third-party models",
 			thinkingDepthHint:
 				"Fills in reasoning levels for hand-declared third-party models. Turning this off stops new fills; levels already written are kept.",
+			enhancedMode: "Armor-piercing prompt injection",
+			enhancedModeHint:
+				"Writes the operator persona at the start of the system prompt and a decisive anchor after the last first-party section (order 60000). Re-evaluated on every model step; turning it off removes it at the next assembly.",
+			jailbreakGuard: "Runtime guard",
+			jailbreakGuardHint:
+				"Injects a continuation when the model refuses, and resumes a turn that ended on error, truncation or interruption. A human cancel is left alone. Active only while injection is on.",
+			jailbreakNote:
+				"Injection is global. Keep only one jailbreak injector installed: pojia adds its own persona and anchor, so both together duplicate the text.",
 			delivery: "Reminder delivery",
 			localNotifications: "Local notifications",
 			localNotificationsHint: "Show a Windows toast on this computer.",
@@ -81,6 +89,14 @@ window.__ModuleLoader__.load({
 			thinkingDepth: "启用非官方模型的思考深度",
 			thinkingDepthHint:
 				"自动为手写声明的第三方模型补写推理档位。关闭后不再补写；已经写入的档位会保留。",
+			enhancedMode: "真破甲注入（系统提示词）",
+			enhancedModeHint:
+				"把操作者人格写进系统提示词开头，并在第一方段落之后（order 60000）追加末尾锚点；每条会话、每个模型步都重新求值。关闭后下一次组装立即消失。",
+			jailbreakGuard: "破甲运行时守卫",
+			jailbreakGuardHint:
+				"模型拒答时自动注入续命消息；报错、截断、中断收尾时自动续跑（人工叫停除外）。仅在破甲开启时生效。",
+			jailbreakNote:
+				"注入是全局的：再装 pojia 会重复塞入人格与锚点，建议只保留一份破甲注入。",
 			delivery: "提醒方式",
 			localNotifications: "本地通知",
 			localNotificationsHint: "在运行 DSH 的电脑上弹出 Windows 通知。",
@@ -455,6 +471,23 @@ window.__ModuleLoader__.load({
 						disabled,
 						onChange: (checked) => change("thinkingDepth", checked),
 					}),
+					h(SettingRow, {
+						label: t("enhancedMode"),
+						hint: t("enhancedModeHint"),
+						checked: value.enhancedMode === true,
+						disabled,
+						onChange: (checked) => change("enhancedMode", checked),
+					}),
+					h(SettingRow, {
+						label: t("jailbreakGuard"),
+						hint: t("jailbreakGuardHint"),
+						checked: value.jailbreakGuard !== false,
+						disabled: disabled || value.enhancedMode !== true,
+						onChange: (checked) => change("jailbreakGuard", checked),
+					}),
+					value.enhancedMode === true
+						? h("p", { className: "dsh-thinking-depth-note" }, t("jailbreakNote"))
+						: null,
 					h("div", { className: "dsh-thinking-depth-group" }, t("delivery")),
 					h(SettingRow, {
 						label: t("localNotifications"),

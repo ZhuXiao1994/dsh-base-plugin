@@ -1,8 +1,8 @@
 {
   "name": "dsh-thinking-depth",
-  "version": "0.7.0",
+  "version": "0.9.1",
   "private": true,
-  "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, raises local and email reminders when a task ends or needs a decision, and exposes all of it in Settings.",
+  "description": "Thinking Depth & Notifications: supplies native reasoning levels for hand-declared third-party models, injects a real operator persona and end-of-prompt anchor with a refusal-recovery guard, raises local and email reminders, and exposes all of it in Settings.",
   "type": "module",
   "license": "MIT",
   "exports": {
@@ -14,6 +14,9 @@
   "files": [
     "index.js",
     "settings.js",
+    "jailbreak.js",
+    "jailbreak-text.js",
+    "jailbreak-guard.js",
     "notify.js",
     "notify-windows.js",
     "email.js",
@@ -46,7 +49,8 @@
     "nodemailer": "^10.3.1"
   },
   "scripts": {
-    "verify": "node tools/verify-host.mjs && node tools/verify-notify.mjs && node tools/verify-settings.mjs && node tools/verify-email.mjs && node tools/verify-delivery.mjs && node tools/verify-test-email.mjs && node tools/verify-client.mjs",
+    "verify": "node tools/verify-host.mjs && node tools/verify-jailbreak.mjs && node tools/verify-guard.mjs && node tools/verify-notify.mjs && node tools/verify-settings.mjs && node tools/verify-email.mjs && node tools/verify-delivery.mjs && node tools/verify-test-email.mjs && node tools/verify-client.mjs",
     "pack": "pnpm pack --pack-destination artifacts"
   }
 }
+

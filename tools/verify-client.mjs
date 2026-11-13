@@ -173,13 +173,53 @@ function collect(node, predicate, out = []) {
 	assert.match(text, /提醒方式/u);
 
 	const switches = collect(tree, (node) => node.type === "Switch");
-	assert.equal(switches.length, 3);
+	assert.equal(switches.length, 5);
 	assert.equal(switches.every((node) => node.props.checked === true), false);
-	assert.equal(switches[2].props.checked, false, "email starts off");
-	assert.equal(switches.every((node) => node.props.disabled === false), true);
+	assert.equal(switches[1].props.checked, false, "jailbreak injection starts off");
+	assert.equal(switches[2].props.checked, true, "the runtime guard defaults to on");
+	assert.equal(switches[2].props.disabled, true, "the guard switch follows the injection switch");
+	assert.equal(switches[4].props.checked, false, "email starts off");
+	assert.deepEqual(
+		switches.map((node) => node.props.disabled),
+		[false, false, true, false, false],
+	);
+	assert.match(text, /真破甲注入/u);
+	assert.match(text, /破甲运行时守卫/u);
+	assert.equal(/再装 pojia/u.test(text), false, "the coexistence note stays hidden while injection is off");
 
 	switches[0].props.onChange(false);
 	assert.deepEqual(form.calls, [["thinkingDepth", false]]);
+}
+
+// 1c. Turning injection on enables the guard and explains the duplicate risk.
+{
+	const form = makeForm({
+		status: "ready",
+		value: {
+			thinkingDepth: true,
+			enhancedMode: true,
+			jailbreakGuard: true,
+			notifications: true,
+			email: false,
+			smtpHost: "",
+			smtpPort: 587,
+			smtpSecure: false,
+			smtpUser: "",
+			emailFrom: "",
+			emailTo: "",
+		},
+		writable: true,
+		revision: 3,
+	});
+	const registration = mount(form);
+	const tree = registration.component(registration.meta.inject());
+	const switches = collect(tree, (node) => node.type === "Switch");
+	assert.equal(switches[1].props.checked, true);
+	assert.equal(switches[2].props.disabled, false, "the guard is switchable once injection is on");
+	assert.match(textOf(tree), /再装 pojia/u);
+
+	switches[2].props.onChange(false);
+	assert.deepEqual(form.calls, [["jailbreakGuard", false]]);
 }
 
 // 1b. Enabling email reveals the SMTP form and its save action.

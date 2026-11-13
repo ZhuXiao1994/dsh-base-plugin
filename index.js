@@ -24,15 +24,26 @@
  * by `delivery.js`; each channel is fire-and-forget and can never fail the
  * agent.
  *
- * Both features are configured from the plugin's own Settings section, backed
+ * Feature three — real jailbreak. The old "enhanced execution mode" wrote an
+ * agent-preset directory that nothing reads any more, so it never reached the
+ * model. This plugin now injects two ordered system-prompt sections instead:
+ * the operator persona at order 0 and a decisive anchor after the last
+ * first-party section (order 60000). Both are evaluated on every assembly and
+ * gate on the live `enhancedMode` switch, so flipping it on or off takes
+ * effect on the next model step without a restart. `jailbreak-guard.js` adds
+ * the runtime half: refusal recovery and auto-continue.
+ *
+ * All features are configured from the plugin's own Settings section, backed
  * by the `settings.js` namespace. The switches are read live; no restart is
- * needed after changing delivery.
+ * needed after changing any of them.
  */
 
 import { Config, readSettings, readSettingsFrom } from "./settings.js";
 import { installAttention } from "./notify.js";
 import { createDelivery } from "./delivery.js";
 import { installTestEmail } from "./test-email.js";
+import { installJailbreak } from "./jailbreak.js";
+import { installGuard } from "./jailbreak-guard.js";
 
 export { Config };
 
@@ -271,6 +282,37 @@ export function apply(ctx, config = {}) {
 			if (timer !== undefined) clearTimeout(timer);
 		};
 	}, "thinking-depth: reasoning capability sweep");
+
+	// 真破甲：把操作者人格与末尾锚点注入系统提示词，并按设置实时开关。
+	// 注入点必须是 `ctx.systemPrompt`（每次组装重新求值），不是写磁盘上的
+	// preset 文件 —— 老版本的 `~/.dsh/.agent-presets/` 早已没有读取方，
+	// 那个"增强执行模式"从来没有进入过提示词。
+	try {
+		ctx.inject(["systemPrompt"], (promptCtx) => {
+			installJailbreak(promptCtx, { read: () => readSettings(ctx) });
+		});
+	} catch (error) {
+		ctx.logger?.warn?.(
+			"thinking-depth: jailbreak prompt sections could not start: %s",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+
+	// 运行时守卫：拒答自愈 + 异常续跑。只在破甲与守卫两个开关同时打开时动手。
+	try {
+		installGuard(ctx, {
+			logger: ctx.logger,
+			isEnabled: () => {
+				const live = readSettings(ctx);
+				return live.enhancedMode === true && live.jailbreakGuard === true;
+			},
+		});
+	} catch (error) {
+		ctx.logger?.warn?.(
+			"thinking-depth: jailbreak guard could not start: %s",
+			error instanceof Error ? error.message : String(error),
+		);
+	}
 
 	// Feature two is independent of the settings sweep and optional. A broken
 	// notifier must never take down the reasoning fix (or the plugin row). The
