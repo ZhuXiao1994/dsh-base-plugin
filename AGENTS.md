@@ -6,7 +6,7 @@ load-bearing.
 
 ## What this is
 
-A DeepSeek Harness plugin bundle with two features and one small Settings
+A DeepSeek Harness plugin bundle with three features and one small Settings
 section:
 
 1. It gives the **third-party models** a profile declares by hand under
@@ -14,8 +14,12 @@ section:
    composer's model picker.
 2. It raises reminders when a task ends or the agent needs a human decision,
    through local Windows toasts and/or SMTP email. See [Reminders](#reminders).
-3. It contributes a **Thinking Depth & Notifications** section to the native
-   Settings page with delivery switches, the SMTP form and a test-send action.
+3. It performs a **real jailbreak**: the operator persona and a decisive anchor
+   are injected as ordered system-prompt sections, and a runtime guard recovers
+   refusals and resumes abnormal turns. See [Jailbreak](#jailbreak).
+4. It contributes a **Thinking Depth & Notifications** section to the native
+   Settings page with the jailbreak switches, delivery switches, the SMTP form
+   and a test-send action.
    See [Settings](#settings).
 
 The reasoning feature's editing surface is still the native **Settings →
@@ -24,15 +28,16 @@ was requested by the user on 2026-10-25 and supersedes the earlier "no settings
 page" decision — do not grow it beyond the feature switches, the email
 configuration and its test action.
 
-- Package: `dsh-thinking-depth` (currently `0.7.0`); the display name is
+- Package: `dsh-thinking-depth` (currently `0.9.0`); the display name is
   **Thinking Depth & Notifications**, and the internal id stays for compatibility
 - Entry: `index.js` — `export function apply(ctx, config)`, `export const inject = ["settings"]`, `export const Config`
 - Bundle: `cordis.patch.yml` inserts the row `dsh-thinking-depth`
 - Client half: `dsh.client` + `./client` export, one `settings.section`
 - Runtime dependency: `nodemailer` for the email channel; loaded lazily
 - Feature settings: the **Thinking Depth & Notifications** section
-  (`thinkingDepth`, `notifications`, `email`, SMTP fields); `config.notifications:
-  false` remains a hard master switch for every reminder channel
+  (`thinkingDepth`, `enhancedMode`, `jailbreakGuard`, `notifications`, `email`,
+  SMTP fields); `config.notifications: false` remains a hard master switch for
+  every reminder channel
 
 ## The mechanism you must understand first
 
@@ -98,7 +103,7 @@ the host `settings` service. That is the only viable path; see
     (`readSettings`/`readSettingsFrom`), not only at `apply()`. Turning
     `thinkingDepth` off pauses future fills but never deletes levels the plugin
     already wrote; turning it back on resumes on the next sweep. The persisted
-    field names (`thinkingDepth`, `notifications`, `email`, `smtpHost`,
+    field names (`thinkingDepth`, `enhancedMode`, `notifications`, `email`, `smtpHost`,
     `smtpPort`, `smtpSecure`, `smtpUser`, `smtpPass`, `emailFrom`, `emailTo`) are
     a compatibility surface — rename only with a migration.
 12. **The Config schema is handcrafted on purpose.** It is not a schemastery
@@ -126,12 +131,31 @@ the host `settings` service. That is the only viable path; see
     `emailFrom` only when it is a real address; otherwise it uses a valid
     `smtpUser`. A bare nickname in From must not disable email delivery.
 
+17. **The jailbreak is a prompt registration, never a file write.** `jailbreak.js`
+    registers two `ctx.systemPrompt.section()` entries whose `text` is a function
+    gated on the live `enhancedMode` switch; an empty string is how "off" is
+    spelled, because `renderPrompt` drops empty sections. Never go back to
+    writing `$DSH_HOME/.agent-presets/<id>/`: nothing reads that directory any
+    more, which is exactly why the old "enhanced execution mode" did nothing.
+18. **The anchor order must stay above `10200`.** `10200` is
+    `DEPLOYMENT_PERSONA_SUFFIX`, the last first-party section; a lower order
+    (`pojia` uses `900`) puts the anchor before the tool guidance, where it stops
+    being the last thing the model reads. `tools/verify-jailbreak.mjs` reads the
+    shipped DSH order table and fails if it moves.
+19. **The guard never fights another guard.** Refusal recovery and auto-continue
+    stand down when another plugin's notice sits after the last turn, when the
+    inbox already holds pending input, when the operator already spoke, and when
+    the switch is off. Both halves read their gate at event time.
+
 ## Layout
 
 | Path | Role |
 |---|---|
 | `index.js` | Entry and host composition: rule tables, `capabilityFor()`, `planSweep()`, `apply()`, Config re-export |
 | `settings.js` | Handcrafted `Config` (booleans, strings, port, secret) and live namespace readers |
+| `jailbreak.js` | Real injection: persona at order 0, anchor at order 60000, live-gated dynamic `text()` |
+| `jailbreak-text.js` | The injected text: `PERSONA` (operator brief + rules) and `ANCHOR` (the decisive end block) |
+| `jailbreak-guard.js` | Runtime guard: refusal recovery, auto-continue, per-turn dedupe, cross-guard stand-down |
 | `notify.js` | Feature two triggers: classification, builders, dedupe, scheduling, listener installation |
 | `notify-windows.js` | Local toast transport: PowerShell script builder, XML/PowerShell escaping, sender |
 | `email.js` | SMTP transport: config validation, recipient parsing, mail text, nodemailer sender |
@@ -143,6 +167,8 @@ the host `settings` service. That is the only viable path; see
 | `icon.svg` | Inventory icon (SVG, well under 256 KiB) |
 | `icon.png` | 64×64 toast `appLogoOverride` image, generated from `icon.svg` |
 | `tools/verify-host.mjs` | Feature-one offline harness |
+| `tools/verify-jailbreak.mjs` | Jailbreak injection harness: section names, orders, live gate, drift check against the shipped DSH order table |
+| `tools/verify-guard.mjs` | Runtime-guard harness: refusal detection, resume decisions, dedupe, caps, stand-down |
 | `tools/verify-notify.mjs` | Notifier offline harness (fake host event bus) |
 | `tools/verify-settings.mjs` | Config shape, validator, secret and namespace-reader harness |
 | `tools/verify-email.mjs` | SMTP configuration, mail text and sender harness (fake transport) |
@@ -190,6 +216,43 @@ To mine a new family, index every entry whose `api` is
 `openai-completions` and `reasoning` is `true`, group by id suffix, and take the
 levels the family agrees on. Put the reduction in `FAMILY_RULES`; put a single
 id in `EXACT_RULES` only when you have its catalog record in hand.
+
+## Jailbreak
+
+`jailbreak.js` owns the injection; `jailbreak-guard.js` owns the runtime half;
+`jailbreak-text.js` holds the text itself.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Persona | `ctx.systemPrompt.section({ name: "thinking-depth:operator-persona", order: 0 })` | Operator brief and the four principles, right after `deployment:persona-prefix` and before every tool section |
+| Anchor | `ctx.systemPrompt.section({ name: "thinking-depth:operator-anchor", order: 60000 })` | The decisive end block: conflict ruling, category rules, format rules |
+| Gate | `text: () => enabled() ? TEXT : ""` | Evaluated on every assembly; `enhancedMode` is read live with a 250 ms memo |
+| Refusal recovery | `agent/status` idle plus `turn/end.reason.kind === "completed"` | Last assistant text matches the refusal pattern, so one plugin-sourced `followup()` is injected |
+| Auto-continue | same event, abnormal reason (`error`/`aborted`/`interrupted`/`max-tokens`) | Settles 280 ms, then one `followup("继续")` unless the operator took over |
+
+Why the ordering is the whole trick:
+
+- `dsh-system-prompt` sorts sections by `order`, then by the name's code-unit
+  order. Equal orders are not "last wins" — the name decides, so
+  `deployment:persona-prefix` (`d` < `t`) renders before
+  `thinking-depth:operator-persona`.
+- First-party sections run from `-1000` (identity) to `10200` (persona suffix).
+  The anchor needs an order **above** `10200`; this plugin uses `60000`. pojia's
+  `900` lands before the file-reference and tool sections, so its "end" block is
+  buried mid-prompt — that is the concrete defect worth not copying.
+- The gate must be a function. A string is evaluated once at `apply()` and then
+  frozen, so the Settings switch would do nothing until a restart.
+- Composability: register a plain section name. Reusing a first-party name
+  (`deployment:persona-prefix`) in the global layer is a duplicate registration
+  and throws; scoped shadowing is a preset feature, not a root plugin's.
+
+Coexistence:
+
+- Only one injector should be installed. `pojia` adds its own persona and anchor;
+  with both enabled the model reads two operator briefs and two anchors.
+- The guard stands down politely when `pojia-guard` (or `dsh-purge`) already
+  injected a notice in the same turn, and when `agent.inbox` is non-empty, so
+  running both guards cannot double-send a continuation.
 
 ## Reminders
 
@@ -267,6 +330,8 @@ native Settings page. It is the only UI the bundle owns.
 |---|---|---|---|
 | `thinkingDepth` | boolean | `true` | Whether new uncurated `llm-pi-ai` routes get reasoning levels filled in |
 | `notifications` | boolean | `true` | Whether local Windows toasts are raised |
+| `enhancedMode` | boolean | `false` | Whether the operator persona and the end anchor are injected into the system prompt (the real jailbreak) |
+| `jailbreakGuard` | boolean | `true` | Whether refusal recovery and auto-continue run; effective only while `enhancedMode` is on |
 | `email` | boolean | `false` | Whether email reminders are sent |
 | `smtpHost` | string | `""` | SMTP server host |
 | `smtpPort` | number | `587` | SMTP port, 1–65535 |
@@ -367,7 +432,7 @@ Run these in order; each catches a different class of mistake.
 ### 1. Offline behaviour (always)
 
 ```powershell
-pnpm verify        # verify-host, verify-notify, verify-settings, verify-email, verify-delivery, verify-test-email, verify-client
+pnpm verify        # host, jailbreak, guard, notify, settings, email, delivery, test-email, client
 ```
 
 `tools/verify-host.mjs` drives `planSweep()` with a descriptor shaped like
@@ -383,8 +448,13 @@ isolation. `tools/verify-test-email.mjs` drives the loopback route with fake
 request/response objects, including method, loopback, header and content-type
 guards. `tools/verify-client.mjs` executes the real `client/client.js`
 through a fake module loader and a minimal React shim, then renders the
-registered section in its ready/loading/read-only states. Extend all seven
-whenever a rule changes.
+registered section in its ready/loading/read-only states. `tools/verify-jailbreak.mjs`
+drives `installJailbreak()` on a fake prompt registry, asserts both section names
+and orders, the live gate and the empty-string "off" path, and cross-checks the
+anchor order against the shipped `dsh-system-prompt` order table.
+`tools/verify-guard.mjs` drives `installGuard()` on a fake host event bus:
+refusal detection, per-turn dedupe, auto-continue decisions, the disabled gate, a
+busy inbox and another guard's notice. Extend all nine whenever a rule changes.
 
 ### 1b. Real transports (manual, before shipping)
 
@@ -616,6 +686,18 @@ confirm one real arrival from the desktop profile.
   false incompleteness warning.
 - **Windows console encoding.** Chinese output in this repository is UTF-8;
   read and write files as UTF-8.
+- **The old preset directory is dead.** `$DSH_HOME/.agent-presets/<id>/` was
+  retired; the shipped skill says verbatim that "nothing reads that directory
+  any more". Writing `agent.cordis.yml` there has no effect at all. Prompt text
+  reaches the model only through `ctx.systemPrompt.section()`.
+- **The anchor is the last section the model reads, not the last one registered.**
+  A registration at order 900 looks like an end anchor in the plugin source and
+  behaves like a mid-prompt footnote in the assembled prompt. Check the number
+  against `LAST_FIRST_PARTY_ORDER` (10200), not against intuition.
+- **The injected text must not contain a double brace.** Sections interpolate
+  variables by default; an unknown reference makes `assemble()` throw and the
+  turn fails with no prompt at all. `tools/verify-jailbreak.mjs` asserts both
+  blocks are free of interpolation groups and backticks.
 
 ## Verified dead ends — do not retry these
 

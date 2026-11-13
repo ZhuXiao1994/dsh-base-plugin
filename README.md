@@ -18,6 +18,8 @@ Models** page; the plugin does not add a model editor.
 | Feature | What it does | Settings |
 |---|---|---|
 | **Reasoning levels** | Fills the reasoning levels a hand-declared `llm-pi-ai` route is missing, so the native effort control works. | Enable thinking levels for third-party models |
+| **Jailbreak injection** | Writes the operator persona at the start of the system prompt and a decisive anchor at the real end (order 60000), re-evaluated on every model step. | Armor-piercing prompt injection |
+| **Jailbreak guard** | Recovers a refusal with one continuation, and resumes a turn that ended on error, truncation or interruption. | Runtime guard |
 | **Reminders** | Raises a notification when a task finishes, asks a question, or waits for approval. | Local notifications and Email notifications, with SMTP details and a **Send test email** action |
 
 The internal package name and settings namespace remain `dsh-thinking-depth` for
@@ -31,6 +33,8 @@ native Settings page.
 | Control | Default | What it does |
 |---|---|---|
 | **Enable thinking levels for third-party models** | on | Fills reasoning levels into new, uncurated `llm-pi-ai` routes. Turning it off stops new fills; levels already written are kept. |
+| **Armor-piercing prompt injection** | off | Writes the operator persona at the start of the system prompt (order 0) and a decisive anchor after the last first-party section (order 60000). Off removes it at the next assembly, with no restart. |
+| **Runtime guard** | on | Injects one continuation when the model refuses, and resumes a turn that ended on error, truncation or interruption. A human cancel is left alone. Active only while injection is on. |
 | **Local notifications** | on | Shows a Windows toast on the computer running DSH. |
 | **Email notifications** | off | Sends reminders through SMTP to the configured mailbox. |
 
@@ -91,6 +95,39 @@ the profile patch override remains a hard master switch:
   config:
     notifications: false
 ```
+
+## Jailbreak
+
+The old "enhanced execution mode" wrote a preset directory under
+`~/.dsh/.agent-presets/`. That path is dead: the DSH preset registry only accepts
+declaration rows from bundles and does not scan that directory, so those files
+never reached the system prompt. The plugin now registers prompt sections
+directly:
+
+| Section | order | Content |
+|---|---|---|
+| `thinking-depth:operator-persona` | `0` | Operator brief, four principles, execution discipline; right after `deployment:persona-prefix` and before every tool section |
+| `thinking-depth:operator-anchor` | `60000` | Conflict ruling, category rules, format rules; after the last first-party section (`deployment:persona-suffix`, `10200`) |
+
+Both `text` values are functions that re-read the injection switch on every
+assembly; off returns an empty string, which `renderPrompt` drops. The switch is
+therefore instant, needs no restart, and leaves no duplicate registration.
+
+Ordering is the whole engineering problem. `dsh-system-prompt` sorts sections by
+`order`, then by the name's code-unit order; first-party sections run up to
+`10200`. pojia places its anchor at `900`, which looks like an end anchor in the
+source but renders before the file-reference and tool sections, where the rest of
+the prompt buries it. That is why it never really wins the end of the prompt.
+
+The runtime guard reads the session log when `agent/status` turns idle: a normal
+turn whose last visible reply reads as a refusal gets one continuation message; a
+turn that ended on `max-tokens` / `error` / `interrupted` gets one "继续" after
+280 ms. A human cancel is left alone, a receipt is not a refusal, each turn is
+recovered at most once, and the guard stands down when `pojia-guard` already
+injected a notice or the inbox still holds pending input.
+
+Install only one injector at a time: pojia adds a second persona and anchor. The
+guards may coexist, because this one yields.
 
 ## Reasoning levels
 
