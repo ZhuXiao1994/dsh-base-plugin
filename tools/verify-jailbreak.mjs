@@ -14,6 +14,7 @@
  * contains an unresolved interpolation group.
  */
 import assert from "node:assert/strict";
+import { closeSync, existsSync, openSync, readFileSync, readSync } from "node:fs";
 import { ANCHOR, PERSONA } from "../jailbreak-text.js";
 import {
 	LAST_FIRST_PARTY_ORDER,
@@ -117,7 +118,6 @@ function makeContext() {
 // `LAST_FIRST_PARTY_ORDER` is the only number that makes the anchor the last
 // thing the model reads; if a DSH upgrade moves the tail, this check fails.
 {
-	const { existsSync, readFileSync } = await import("node:fs");
 	const tail = [
 		"C:\\Users\\94438\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app\\dsh\\node_modules",
 		"@deepseek-ai",
@@ -125,8 +125,24 @@ function makeContext() {
 		"lib",
 		"index.js",
 	].join("\\");
+	const archive = [
+		"C:\\Users\\94438\\AppData\\Local\\Programs\\DeepSeek Harness\\resources",
+		"app.asar",
+	].join("\\");
+	const entry = "dsh/node_modules/@deepseek-ai/dsh-system-prompt/lib/index.js";
+	let source = null;
+	let origin = "";
 	if (existsSync(tail)) {
-		const source = readFileSync(tail, "utf8");
+		source = readFileSync(tail, "utf8");
+		origin = "unpacked app directory";
+	} else if (existsSync(archive)) {
+		const bytes = readFromAsar(archive, entry);
+		if (bytes !== null) {
+			source = bytes.toString("utf8");
+			origin = "app.asar";
+		}
+	}
+	if (source !== null) {
 		const match = /DEPLOYMENT_PERSONA_SUFFIX:\s*([\d.e]+)/u.exec(source);
 		assert.ok(match, "the shipped order table still names DEPLOYMENT_PERSONA_SUFFIX");
 		const shipped = Number(match[1]);
@@ -136,9 +152,51 @@ function makeContext() {
 			"the shipped tail order changed; re-check the anchor order in jailbreak.js",
 		);
 		assert.ok(SECTIONS.anchor.order > shipped);
-		console.log(`jailbreak injection: shipped tail order ${shipped}, anchor ${SECTIONS.anchor.order}`);
+		console.log(
+			`jailbreak injection: shipped tail order ${shipped} (${origin}), anchor ${SECTIONS.anchor.order}`,
+		);
 	} else {
 		console.log("jailbreak injection: shipped DSH sources not found, drift check skipped");
+	}
+}
+
+/**
+ * Read one entry out of an Electron ASAR archive without any dependency.
+ *
+ * Layout: | u32 = 4 | u32 headerSize | header pickle at byte 8 | payload |.
+ * The pickle is `u32 stringLength` followed by the JSON directory, so the JSON
+ * starts four bytes before its opening brace and the payload starts at
+ * `8 + headerSize`.
+ *
+ * @param archive - absolute path of the `.asar` file.
+ * @param entryPath - slash-separated path inside the archive.
+ * @returns the entry bytes, or null when the archive or entry is unreadable.
+ */
+function readFromAsar(archive, entryPath) {
+	const fd = openSync(archive, "r");
+	try {
+		const pre = Buffer.alloc(8);
+		readSync(fd, pre, 0, 8, 0);
+		const headerSize = pre.readUInt32LE(4);
+		const header = Buffer.alloc(headerSize);
+		readSync(fd, header, 0, headerSize, 8);
+		const brace = header.indexOf(0x7b);
+		if (brace < 4) return null;
+		const jsonLength = header.readUInt32LE(brace - 4);
+		const index = JSON.parse(header.subarray(brace, brace + jsonLength).toString("utf8"));
+		let node = index;
+		for (const part of entryPath.split("/")) {
+			node = node?.files?.[part];
+			if (node === undefined) return null;
+		}
+		if (typeof node.size !== "number" || node.offset === undefined) return null;
+		const data = Buffer.alloc(node.size);
+		readSync(fd, data, 0, node.size, 8 + headerSize + Number(node.offset));
+		return data;
+	} catch {
+		return null;
+	} finally {
+		closeSync(fd);
 	}
 }
 
